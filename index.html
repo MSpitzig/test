@@ -347,6 +347,13 @@
     width: 20px;
     flex-shrink: 0;
   }
+  ul.roster li .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.3) inset;
+  }
   ul.roster li .nm { flex: 1; }
   ul.roster li button.remove {
     background: none;
@@ -467,7 +474,7 @@
   <header class="hero">
     <span class="eyebrow">Classroom Draw</span>
     <h1 class="title">Plinko Picker</h1>
-    <p class="tagline">Drop a marble through the pegboard to call on a student — every name gets an equal lane, and the board just makes it fun to watch.</p>
+    <p class="tagline">Every student's marble drops together and bounces down the same pegboard — whichever one crosses the line first wins. Real physics decide it; the only trick is a fresh shuffle of starting lanes each race.</p>
   </header>
 
   <div class="layout">
@@ -477,16 +484,16 @@
         <span class="pill" id="pickedPill" style="background:var(--panel-raised); color:var(--ivory-dim); border:1px solid rgba(244,236,216,0.14);">0 picked</span>
       </div>
       <div class="board-frame">
-        <canvas id="board" width="600" height="520" role="img" aria-label="Plinko board"></canvas>
+        <canvas id="board" width="600" height="520" role="img" aria-label="Marble race track"></canvas>
         <div class="banner" id="banner">
-          <div class="label">Landed on</div>
+          <div class="label">Winner</div>
           <div class="winner-name" id="bannerName">—</div>
         </div>
       </div>
       <div class="board-actions">
-        <button class="drop-btn" id="dropBtn" disabled>Drop the marble</button>
+        <button class="drop-btn" id="dropBtn" disabled>Start the race</button>
       </div>
-      <p class="empty-note" id="emptyNote">Add at least 2 students to start the board.</p>
+      <p class="empty-note" id="emptyNote">Add at least 2 students to start a race.</p>
     </section>
 
     <aside class="sidebar">
@@ -525,7 +532,7 @@
     </aside>
   </div>
 
-  <footer class="credit">No two drops follow the same path, but every name has exactly the same odds.</footer>
+  <footer class="credit">No two races run the same, but every marble starts on equal footing.</footer>
 </div>
 
 <script>
@@ -533,9 +540,9 @@
   "use strict";
 
   /* ---------------- State ---------------- */
-  var STORAGE_KEY = "plinko-picker-state-v1";
+  var STORAGE_KEY = "plinko-picker-state-v2";
   var state = {
-    students: [],       // {id, name}
+    students: [],       // {id, name, hue}
     removeAfterPick: true,
     history: []          // {name, seq}
   };
@@ -563,7 +570,9 @@
   }
 
   var uid = 0;
-  function nextId() { uid += 1; return "s" + Date.now() + "_" + uid; }
+  // Golden-angle hue steps give every student a visually distinct marble
+  // color regardless of how many are added, with no picked-in-advance list.
+  function nextHue() { uid += 1; return Math.round((uid * 137.508) % 360); }
 
   /* ---------------- DOM refs ---------------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -581,11 +590,10 @@
   function addName(raw) {
     var name = (raw || "").trim();
     if (!name) return;
-    state.students.push({ id: nextId(), name: name });
+    state.students.push({ id: "s" + Date.now() + "_" + (uid + 1), name: name, hue: nextHue() });
     fullRoster = null;
     renderRoster();
     saveState();
-    layoutBoard();
   }
 
   function removeName(id) {
@@ -593,7 +601,6 @@
     fullRoster = null;
     renderRoster();
     saveState();
-    layoutBoard();
   }
 
   function resetRoster() {
@@ -605,9 +612,10 @@
     renderRoster();
     renderHistory();
     saveState();
-    layoutBoard();
     hideBanner();
   }
+
+  function swatchColor(hue) { return "hsl(" + (hue || 0) + ", 70%, 56%)"; }
 
   function renderRoster() {
     rosterList.innerHTML = "";
@@ -618,6 +626,9 @@
       var idx = document.createElement("span");
       idx.className = "idx";
       idx.textContent = String(i + 1).padStart(2, "0");
+      var sw = document.createElement("span");
+      sw.className = "swatch";
+      sw.style.background = swatchColor(s.hue);
       var nm = document.createElement("span");
       nm.className = "nm";
       nm.textContent = s.name;
@@ -627,15 +638,16 @@
       rm.textContent = "×";
       rm.addEventListener("click", function () { removeName(s.id); });
       li.appendChild(idx);
+      li.appendChild(sw);
       li.appendChild(nm);
       li.appendChild(rm);
       rosterList.appendChild(li);
     });
     playersPill.textContent = state.students.length + " in play";
     pickedPill.textContent = state.history.length + " picked";
-    dropBtn.disabled = state.students.length < 2 || dropping;
+    dropBtn.disabled = state.students.length < 2 || !!race;
     emptyNote.textContent = state.students.length < 2
-      ? "Add at least 2 students to start the board."
+      ? "Add at least 2 students to start a race."
       : "";
   }
 
@@ -702,6 +714,13 @@
     return val % range;
   }
 
+  // Fisher-Yates using the crypto-backed RNG above — this is where the
+  // fairness of a race actually lives: every student's marble runs through
+  // literally the same physics, so the only thing that could favor one
+  // lane over another is track geometry. Shuffling which student gets
+  // which starting lane, fresh every race, means any such bias averages
+  // out to nothing over repeated use instead of always favoring the same
+  // name.
   function shuffle(arr) {
     for (var i = arr.length - 1; i > 0; i--) {
       var j = secureRandomInt(i + 1);
@@ -710,53 +729,24 @@
     return arr;
   }
 
-  // Builds a random L/R bounce sequence that is CONSTRAINED to land on
-  // targetSlot, so the path looks organic every time but the outcome was
-  // already decided fairly (uniform pick) before the marble ever moves.
-  function buildPath(rows, targetSlot) {
-    var decisions = [];
-    for (var i = 0; i < rows; i++) decisions.push(i < targetSlot ? "R" : "L");
-    return shuffle(decisions);
-  }
-
-  /* ---------------- Board geometry + drawing ---------------- */
-  // Peg rows stay at (at least) this count regardless of roster size, so a
-  // small class still gets a full-size board — bins merge and widen instead
-  // of the board shrinking down to almost nothing.
-  var BASE_ROWS = 10;
-  var layout = null; // { rows, spacing, rowHeight, centerX, topY, pegR, slots, slotRanges, obstacles }
+  /* ---------------- Track geometry ---------------- */
+  var layout = null;
   var dpr = Math.max(1, window.devicePixelRatio || 1);
-  var dropping = false;
-
-  // Splits `totalBins` lattice positions as evenly as possible across `n`
-  // named slots, so fewer students means each gets a wider slot rather than
-  // the board growing or shrinking pegs.
-  function distributeBins(totalBins, n) {
-    var ranges = [];
-    var base = Math.floor(totalBins / n), rem = totalBins % n;
-    var cursor = 0;
-    for (var i = 0; i < n; i++) {
-      var size = base + (i < rem ? 1 : 0);
-      ranges.push({ start: cursor, end: cursor + size });
-      cursor += size;
-    }
-    return ranges;
-  }
+  var race = null; // null when idle, otherwise { marbles, winner, settleFrames, lastTs }
 
   function layoutBoard() {
-    var n = state.students.length;
-    var rows = Math.max(BASE_ROWS, n - 1);
     var frame = canvas.parentElement;
-    var maxWidth = Math.min(680, frame.clientWidth - 16 || 560);
-    var spacing = Math.max(26, Math.min(58, maxWidth / (rows + 2)));
-    var boardWidth = spacing * (rows + 1) + spacing * 2;
-    var width = Math.max(maxWidth, boardWidth);
-    var rowHeight = Math.max(26, Math.min(42, 380 / (rows + 1)));
-    var introTop = 30;
-    var introHeight = rowHeight * 3.4;
-    var topPad = introTop + introHeight;
-    var slotRowH = 128;
-    var height = topPad + rowHeight * rows + slotRowH + 20;
+    var width = Math.min(680, frame.clientWidth - 16 || 560);
+    var PEG_COLS = 9, PEG_ROWS = 9;
+    var spacingX = width / (PEG_COLS + 1);
+    var spacingY = Math.max(36, Math.min(48, spacingX * 1.05));
+    var pegR = Math.max(4, Math.min(6, spacingX * 0.12));
+    var introTop = 26;
+    var introHeight = spacingY * 3;
+    var topY = introTop + introHeight;
+    var finishGap = 46;
+    var finishY = topY + (PEG_ROWS - 1) * spacingY + spacingY * 0.6;
+    var height = finishY + finishGap + 20;
 
     canvas.style.width = width + "px";
     canvas.style.height = height + "px";
@@ -764,109 +754,106 @@
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    var wallLeft = spacingX * 0.35, wallRight = width - spacingX * 0.35;
     var centerX = width / 2;
 
-    var slotRanges = n > 0 ? distributeBins(rows + 1, n) : [];
-    var dividerXAt = function (d) { return centerX + (d - (rows + 1) / 2) * spacing; };
-    var slots = slotRanges.map(function (range, idx) {
-      var left = dividerXAt(range.start), right = dividerXAt(range.end);
-      return { left: left, right: right, x: (left + right) / 2, name: state.students[idx] ? state.students[idx].name : "" };
-    });
+    // Offset "brick" rows — the classic pachinko pattern — so a marble
+    // never has a clean straight gap to fall through; it always has to
+    // pick a side.
+    var pegs = [];
+    for (var r = 0; r < PEG_ROWS; r++) {
+      var offset = (r % 2 === 1) ? spacingX / 2 : 0;
+      var cols = (r % 2 === 1) ? PEG_COLS - 1 : PEG_COLS;
+      for (var c = 0; c < cols; c++) {
+        pegs.push({ x: spacingX + c * spacingX + offset, y: topY + r * spacingY, r: pegR, hitTs: -Infinity });
+      }
+    }
 
-    // The peg field now fills a full rectangle (not a narrowing triangle),
-    // so its half-width is constant at every row — obstacles just place
-    // freely within it. fx is a fraction of that constant half-width
-    // (-1..1), fy a fraction of the rows from apex to base.
+    var fieldHalfWidth = (wallRight - wallLeft) / 2;
     var obstacleDefs = [
-      { fx: -0.6, fy: 0.22, speed: 1.1, phase: 0 },
-      { fx: 0.68, fy: 0.3, speed: -0.9, phase: 2.1 },
-      { fx: 0, fy: 0.5, speed: 0.7, phase: 1.6 },
-      { fx: -0.72, fy: 0.68, speed: -0.6, phase: 3.4 },
-      { fx: 0.55, fy: 0.82, speed: 0.85, phase: 4.4 }
+      { fx: -0.6, fy: 0.18, speed: 1.1, phase: 0 },
+      { fx: 0.62, fy: 0.34, speed: -0.9, phase: 2.1 },
+      { fx: 0, fy: 0.52, speed: 0.7, phase: 1.6 },
+      { fx: -0.55, fy: 0.7, speed: -0.6, phase: 3.4 },
+      { fx: 0.5, fy: 0.86, speed: 0.85, phase: 4.4 }
     ];
-    var hubR = Math.max(6, Math.min(11, spacing * 0.22));
-    var bladeLen = Math.max(30, Math.min(58, spacing * 1.2));
-    var rectHalfWidth = ((rows - 1) / 2) * spacing;
+    var hubR = Math.max(6, Math.min(10, spacingX * 0.2));
+    var bladeLen = Math.max(24, Math.min(44, spacingX * 1.0));
     var obstacles = obstacleDefs.map(function (o) {
       return {
-        x: centerX + o.fx * rectHalfWidth * 0.68,
-        y: topPad + o.fy * rowHeight * (rows - 1),
-        hubR: hubR, bladeLen: bladeLen, speed: o.speed, phase: o.phase,
-        hitTs: -Infinity, cooldownUntil: 0
+        x: centerX + o.fx * fieldHalfWidth * 0.72,
+        y: topY + o.fy * (PEG_ROWS - 1) * spacingY,
+        hubR: hubR, bladeLen: bladeLen, collideR: hubR + bladeLen * 0.4,
+        speed: o.speed, phase: o.phase, hitTs: -Infinity
       };
     });
 
     // A couple of bouncers in the open-air release zone above the peg
-    // forest, so the marble tumbles through something before it ever
-    // reaches the first row of pegs.
+    // field, so marbles tumble through something before they ever reach
+    // the first row of pegs.
     var introBouncerDefs = [
-      { fx: -0.42, fy: 0.4, speed: 0.85, phase: 0.6 },
-      { fx: 0.4, fy: 0.72, speed: -0.7, phase: 3.1 }
+      { fx: -0.4, fy: 0.4, speed: 0.85, phase: 0.6 },
+      { fx: 0.42, fy: 0.72, speed: -0.7, phase: 3.1 }
     ];
-    var introBladeLen = Math.max(22, Math.min(40, spacing * 0.85));
+    var introBladeLen = Math.max(18, Math.min(32, spacingX * 0.7));
     introBouncerDefs.forEach(function (o) {
       obstacles.push({
-        x: centerX + o.fx * rectHalfWidth * 0.68,
+        x: centerX + o.fx * fieldHalfWidth * 0.72,
         y: introTop + o.fy * introHeight,
-        hubR: hubR * 0.85, bladeLen: introBladeLen, speed: o.speed, phase: o.phase,
-        hitTs: -Infinity, cooldownUntil: 0
+        hubR: hubR * 0.85, bladeLen: introBladeLen, collideR: hubR * 0.85 + introBladeLen * 0.4,
+        speed: o.speed, phase: o.phase, hitTs: -Infinity
       });
     });
 
     layout = {
-      rows: rows, spacing: spacing, rowHeight: rowHeight, slotRowH: slotRowH,
-      centerX: centerX, topY: topPad, introTop: introTop, introHeight: introHeight,
-      pegR: Math.max(3, Math.min(5.5, spacing * 0.11)),
-      slotY: topPad + rowHeight * rows, width: width, height: height,
-      slots: slots, slotRanges: slotRanges, obstacles: obstacles
+      width: width, height: height, wallLeft: wallLeft, wallRight: wallRight,
+      introTop: introTop, introHeight: introHeight, topY: topY, finishY: finishY,
+      spacingX: spacingX, spacingY: spacingY, pegR: pegR, centerX: centerX,
+      pegs: pegs, obstacles: obstacles
     };
 
-    drawBoard({ ts: performance.now() });
+    drawTrack({ ts: performance.now(), marbles: idleMarbles() });
   }
 
-  function pegPos(i, j) {
-    return {
-      x: layout.centerX + (j - i / 2) * layout.spacing,
-      y: layout.topY + i * layout.rowHeight
-    };
+  function marbleRadiusFor(n) {
+    var usable = layout.wallRight - layout.wallLeft;
+    var byLane = (usable / Math.max(n, 2)) * 0.34;
+    return Math.max(6, Math.min(15, layout.spacingX * 0.3, byLane));
   }
 
-  function latticeX(j) {
-    return layout.centerX + (j - layout.rows / 2) * layout.spacing;
+  function idleMarbles() {
+    var n = state.students.length;
+    if (!n || !layout) return [];
+    var r = marbleRadiusFor(n);
+    var usable = layout.wallRight - layout.wallLeft;
+    var laneW = usable / n;
+    var y = layout.introTop + r + 4;
+    return state.students.map(function (s, i) {
+      return { student: s, hue: s.hue, x: layout.wallLeft + laneW * (i + 0.5), y: y, r: r };
+    });
   }
 
-  function drawPeg(x, y, glow, dim) {
-    var r = dim ? layout.pegR * 0.62 : layout.pegR;
-    if (dim) {
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(217,164,65,0.28)";
-      ctx.fill();
-      return;
-    }
+  /* ---------------- Drawing ---------------- */
+  function drawPeg(x, y, glow) {
+    var r = layout.pegR;
     var grad = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, 0.3, x, y, r * 1.4);
-    if (glow) {
-      grad.addColorStop(0, "#fff2c8");
-      grad.addColorStop(1, "#f6d488");
-    } else {
-      grad.addColorStop(0, "#f6d488");
-      grad.addColorStop(1, "#a97b28");
-    }
+    if (glow) { grad.addColorStop(0, "#fff2c8"); grad.addColorStop(1, "#f6d488"); }
+    else { grad.addColorStop(0, "#f6d488"); grad.addColorStop(1, "#a97b28"); }
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = grad;
     ctx.fill();
     if (glow) {
       ctx.beginPath();
-      ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,215,122,0.18)";
+      ctx.arc(x, y, r * 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,215,122,0.16)";
       ctx.fill();
     }
   }
 
   function drawSpinner(ob, ts) {
     var angle = (ts || 0) / 1000 * ob.speed + ob.phase;
-    var hit = (ts || 0) - ob.hitTs < 260;
+    var hit = (ts || 0) - ob.hitTs < 220;
     var len = ob.bladeLen;
 
     ctx.save();
@@ -899,95 +886,33 @@
 
     if (hit) {
       ctx.beginPath();
-      ctx.arc(ob.x, ob.y, len * 0.9, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,215,122,0.16)";
+      ctx.arc(ob.x, ob.y, len * 0.85, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,215,122,0.14)";
       ctx.fill();
     }
   }
 
-  // Trims a name to fit maxWidth px, assuming ctx.font is already set to the
-  // font it will be drawn with.
-  function fitLabel(name, maxWidth) {
-    if (ctx.measureText(name).width <= maxWidth) return name;
-    var lo = 0, hi = name.length;
-    while (lo < hi) {
-      var mid = Math.ceil((lo + hi) / 2);
-      if (ctx.measureText(name.slice(0, mid) + "…").width <= maxWidth) lo = mid;
-      else hi = mid - 1;
-    }
-    return lo > 0 ? name.slice(0, lo) + "…" : "…";
-  }
-
-  function drawBoard(opts) {
-    opts = opts || {};
-    if (!layout) return;
-    var w = layout.width, h = layout.height;
-    ctx.clearRect(0, 0, w, h);
-
-    // subtle felt seams
-    ctx.strokeStyle = "rgba(244,236,216,0.05)";
-    ctx.lineWidth = 1;
-    for (var gy = layout.topY; gy < layout.slotY; gy += layout.rowHeight) {
-      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
-    }
-
-    // pegs — the triangle the marble actually bounces through, filled out
-    // to a full rectangle with smaller, dimmer decorative pegs using the
-    // same lattice formula so the pattern reads as one continuous grid
-    var rows = layout.rows;
-    var halfSpan = (rows - 1) / 2;
-    for (var i = 0; i < rows; i++) {
-      var jMin = Math.ceil(i / 2 - halfSpan), jMax = Math.floor(i / 2 + halfSpan);
-      for (var j = jMin; j <= jMax; j++) {
-        var p = pegPos(i, j);
-        var isReal = j >= 0 && j <= i;
-        var isHot = isReal && opts.hotPeg && opts.hotPeg.row === i && opts.hotPeg.col === j;
-        drawPeg(p.x, p.y, isHot, !isReal);
-      }
-    }
-
-    // spinning obstacles, scattered among the pegs
-    layout.obstacles.forEach(function (ob) { drawSpinner(ob, opts.ts); });
-
-    // fine bin dividers (every lattice position the marble can actually land on)
-    var dividerTop = layout.slotY;
-    var dividerBottom = layout.slotY + layout.slotRowH - 14;
-    var labelMaxLen = dividerBottom - dividerTop - 14;
-    ctx.lineWidth = 1;
-    for (var d = 0; d <= layout.rows + 1; d++) {
-      var dx = layout.centerX + (d - (layout.rows + 1) / 2) * layout.spacing;
-      ctx.strokeStyle = "rgba(217,164,65,0.18)";
-      ctx.beginPath(); ctx.moveTo(dx, dividerTop); ctx.lineTo(dx, dividerBottom); ctx.stroke();
-    }
-
-    // named slots, each spanning one or more of those fine bins
+  function drawFinishLine() {
+    var y = layout.finishY;
+    ctx.save();
+    ctx.strokeStyle = "rgba(226,83,47,0.85)";
     ctx.lineWidth = 2;
-    layout.slots.forEach(function (s, idx) {
-      var highlighted = opts.landedSlot === idx;
-      ctx.fillStyle = highlighted ? "rgba(226,83,47,0.28)" : "rgba(244,236,216,0.035)";
-      ctx.fillRect(s.left + 1, dividerTop, s.right - s.left - 2, dividerBottom - dividerTop);
-      ctx.strokeStyle = "rgba(217,164,65,0.5)";
-      ctx.strokeRect(s.left + 1, dividerTop, s.right - s.left - 2, dividerBottom - dividerTop);
-
-      ctx.save();
-      ctx.translate(s.x, dividerBottom - 10);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillStyle = highlighted ? "#ffe6b8" : "rgba(244,236,216,0.7)";
-      ctx.font = (highlighted ? "700 " : "600 ") + Math.max(10, Math.min(13, layout.spacing * 0.26)) + "px Manrope, sans-serif";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(fitLabel(s.name, labelMaxLen), 0, 0);
-      ctx.restore();
-    });
-
-    // marble
-    if (opts.marble) drawMarble(opts.marble.x, opts.marble.y, opts.marble.squash);
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(layout.wallLeft, y);
+    ctx.lineTo(layout.wallRight, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font = '700 11px "Space Mono", monospace';
+    ctx.fillStyle = "rgba(244,236,216,0.6)";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillText("FINISH", layout.wallRight, y - 6);
+    ctx.restore();
   }
 
-  function drawMarble(x, y, squash) {
-    squash = squash || 1;
-    var r = layout.pegR * 2.1;
-
+  function drawMarble(x, y, r, hue) {
+    var mid = "hsl(" + hue + ", 70%, 56%)", dark = "hsl(" + hue + ", 60%, 24%)";
     ctx.beginPath();
     ctx.ellipse(x, y + r * 1.05, r * 0.9, r * 0.25, 0, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(0,0,0,0.3)";
@@ -995,30 +920,62 @@
 
     ctx.save();
     ctx.translate(x, y);
-    ctx.scale(1 / squash, squash);
-    // polished-steel shading: a tight bright highlight, a hard falloff into
-    // mid-tone, and a distinctly dark rim — reads as a solid sphere rather
-    // than a flat, soft disc
     var body = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.05, 0, 0, r * 1.05);
     body.addColorStop(0, "#ffffff");
-    body.addColorStop(0.22, "#eef1f0");
-    body.addColorStop(0.55, "#aab0ae");
-    body.addColorStop(0.85, "#5c6260");
-    body.addColorStop(1, "#2c302f");
+    body.addColorStop(0.2, "#f2f4f2");
+    body.addColorStop(0.5, mid);
+    body.addColorStop(0.85, dark);
+    body.addColorStop(1, "#15100f");
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fillStyle = body;
     ctx.fill();
-    ctx.lineWidth = Math.max(0.75, r * 0.06);
+    ctx.lineWidth = Math.max(0.75, r * 0.08);
     ctx.strokeStyle = "rgba(10,12,11,0.55)";
     ctx.stroke();
-
-    // small crisp specular dot on top of the soft highlight, for extra shine
     ctx.beginPath();
     ctx.ellipse(-r * 0.32, -r * 0.4, r * 0.22, r * 0.14, -0.6, 0, Math.PI * 2);
     ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fill();
     ctx.restore();
+  }
+
+  function drawMarbleLabel(m) {
+    if (m.r < 6.5) return;
+    var name = m.student.name.length > 10 ? m.student.name.slice(0, 9) + "…" : m.student.name;
+    ctx.font = "700 " + Math.max(9, Math.min(11, m.r * 0.85)) + "px Manrope, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillStyle = "rgba(8,16,12,0.6)";
+    ctx.fillText(name, m.x + 0.6, m.y - m.r - 3.4);
+    ctx.fillStyle = "#f4ecd8";
+    ctx.fillText(name, m.x, m.y - m.r - 4);
+  }
+
+  function drawTrack(opts) {
+    opts = opts || {};
+    if (!layout) return;
+    ctx.clearRect(0, 0, layout.width, layout.height);
+
+    ctx.strokeStyle = "rgba(244,236,216,0.05)";
+    ctx.lineWidth = 1;
+    for (var gy = layout.topY; gy < layout.finishY; gy += layout.spacingY) {
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(layout.width, gy); ctx.stroke();
+    }
+
+    layout.pegs.forEach(function (p) { drawPeg(p.x, p.y, (opts.ts || 0) - p.hitTs < 140); });
+    layout.obstacles.forEach(function (ob) { drawSpinner(ob, opts.ts); });
+    drawFinishLine();
+
+    if (opts.marbles) opts.marbles.forEach(function (m) { drawMarble(m.x, m.y, m.r, m.hue); drawMarbleLabel(m); });
+    if (opts.winnerMarble) {
+      ctx.beginPath();
+      ctx.arc(opts.winnerMarble.x, opts.winnerMarble.y, opts.winnerMarble.r * 1.9, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,215,122,0.7)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (opts.confettiStep) stepConfetti();
   }
 
   /* ---------------- Confetti ---------------- */
@@ -1040,9 +997,7 @@
   }
   function stepConfetti() {
     if (!confetti.length) return;
-    confetti.forEach(function (c) {
-      c.x += c.vx; c.y += c.vy; c.vy += c.g; c.life -= 1; c.rot += 0.15;
-    });
+    confetti.forEach(function (c) { c.x += c.vx; c.y += c.vy; c.vy += c.g; c.life -= 1; c.rot += 0.15; });
     confetti = confetti.filter(function (c) { return c.life > 0 && c.y < layout.height + 20; });
     confetti.forEach(function (c) {
       ctx.save();
@@ -1054,179 +1009,141 @@
     });
   }
 
-  /* ---------------- Drop animation ---------------- */
-  function dropMarble() {
-    if (dropping || state.students.length < 2) return;
-    dropping = true;
-    dropBtn.disabled = true;
-    hideBanner();
+  /* ---------------- Real physics ---------------- */
+  // A genuine 2D circle-collision simulation — constant gravity, elastic
+  // bounces off pegs/obstacles/walls, and marble-vs-marble collisions —
+  // run with several substeps per frame so fast-moving marbles don't
+  // tunnel through pegs. Nothing about the outcome is scripted; the race
+  // plays out however the physics actually resolves it.
+  var GRAVITY = 1900;
+  var SUBSTEPS = 4;
+  var WALL_REST = 0.55, PEG_REST = 0.55, OBSTACLE_REST = 0.6, MARBLE_REST = 0.7;
 
-    var winnerIdx = secureRandomInt(state.students.length);
-    var winner = state.students[winnerIdx];
-    var rows = layout.rows;
-    var range = layout.slotRanges[winnerIdx];
-    // Any lattice position inside the winner's slot lands correctly — which
-    // exact one is purely cosmetic, since the student was already chosen
-    // fairly above, before the visual path exists.
-    var targetLattice = range.start + secureRandomInt(range.end - range.start);
-    var path = buildPath(rows, targetLattice);
-
-    // sequence of positions the marble visits: released above the pegs,
-    // free-falls to the apex, then lattice positions for row 0..rows
-    var points = [{ x: layout.centerX, y: layout.introTop }, pegPos(0, 0)];
-    var j = 0;
-    for (var i = 0; i < rows; i++) {
-      if (path[i] === "R") j += 1;
-      points.push(i + 1 === rows ? { x: latticeX(j), y: layout.slotY - 6 } : pegPos(i + 1, j));
-    }
-
-    // The marble's rendered path stops at the peg's SURFACE, not its
-    // center — routing the ball's center exactly onto each peg's center
-    // (the naive approach) makes the two circles overlap dead-on at every
-    // impact, which reads as the ball melting into the peg rather than
-    // bouncing off it. Nudge each peg waypoint sideways by the combined
-    // radius, away from the direction it's approached from — vertical
-    // motion is untouched (it's driven entirely by the gravity formula
-    // below, off "from", never "to"), so this can't desync the timing.
-    var marbleR = layout.pegR * 2.1;
-    var combinedR = layout.pegR + marbleR;
-    var renderPoints = points.map(function (p) { return { x: p.x, y: p.y }; });
-    for (var rp = 2; rp < points.length - 1; rp++) {
-      var pdx = points[rp].x - points[rp - 1].x;
-      if (pdx !== 0) renderPoints[rp].x = points[rp].x - Math.sign(pdx) * combinedR;
-    }
-
-    // Real kinematics: constant gravity, and each peg impact reflects the
-    // marble's downward velocity back upward (losing some of it, a real
-    // bounce) instead of just carrying it forward — so it actually rises
-    // off each peg before gravity pulls it back down to the next one.
-    // g scales with rowHeight so pacing stays consistent across board sizes.
-    // The first hop is the long release-height free-fall, everything after
-    // is a normal row-to-row hop.
-    var rowHeight = layout.rowHeight;
-    var g = rowHeight * 14;
-    var restitution = 0.32;
-    var hopDistances = [layout.introHeight];
-    for (var hd = 0; hd < rows; hd++) hopDistances.push(rowHeight);
-    var hopDur = [], hopVy0 = [];
-    var vy0 = 0;
-    for (var hi = 0; hi < hopDistances.length; hi++) {
-      var d = hopDistances[hi];
-      var T = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * d)) / g;
-      hopDur.push(T);
-      hopVy0.push(vy0);
-      var vyImpact = vy0 + g * T;
-      vy0 = -restitution * vyImpact;
-    }
-
-    var segIndex = 0;
-    var segStart = null;
-
-    // The spinning obstacles cosmetically knock the marble sideways on
-    // contact — it's a spring that snaps back toward zero, layered on top
-    // of the real (fixed) path, so it never changes where the marble
-    // actually ends up.
-    var bumpX = 0, bumpVX = 0;
-    function applyObstacleHits(mx, my, ts) {
-      layout.obstacles.forEach(function (ob) {
-        if (ts < ob.cooldownUntil) return;
-        var dx = mx - ob.x, dy = my - ob.y;
-        var dist = Math.sqrt(dx * dx + dy * dy);
-        // the long spinning blades are the actual hit zone, not just the hub
-        var hitDist = ob.bladeLen * 0.9 + layout.pegR * 2.1;
-        if (dist < hitDist) {
-          ob.hitTs = ts;
-          ob.cooldownUntil = ts + 380;
-          var nx = dist > 0.001 ? dx / dist : (Math.random() < 0.5 ? -1 : 1);
-          // capped so a near-dead-center pass can't fling it unnaturally far
-          bumpVX += nx * Math.min(hitDist - dist, hitDist * 0.45) * 0.4;
-        }
-      });
-    }
-
-    function animateSegment(ts) {
-      if (segStart === null) segStart = ts;
-      var from = renderPoints[segIndex], to = renderPoints[segIndex + 1];
-      var T = hopDur[segIndex], v0 = hopVy0[segIndex];
-      var elapsedSec = Math.min((ts - segStart) / 1000, T);
-      var u = T > 0 ? elapsedSec / T : 1;
-
-      var mx = from.x + (to.x - from.x) * u;
-      // actual kinematics — starts at the speed carried over from the last
-      // bounce and accelerates under gravity for the rest of the hop
-      var my = from.y + v0 * elapsedSec + 0.5 * g * elapsedSec * elapsedSec;
-      var currentVy = v0 + g * elapsedSec;
-      var vyImpact = v0 + g * T;
-      // stretches more the faster it's actually falling, flattens on impact
-      var squash = 1 + 0.22 * (vyImpact > 0 ? currentVy / vyImpact : 0) - 0.3 * Math.pow(u, 6);
-
-      applyObstacleHits(mx, my, ts);
-      bumpVX *= 0.9; bumpX += bumpVX; bumpX *= 0.93;
-
-      var hotPeg = (u > 0.85 && segIndex < rows) ? { row: segIndex, col: getCol(segIndex) } : null;
-      drawBoard({ marble: { x: mx + bumpX, y: my, squash: squash }, hotPeg: hotPeg, ts: ts });
-
-      if (u >= 1) {
-        segIndex += 1;
-        segStart = null;
-        if (segIndex >= points.length - 1) {
-          landMarble(winner, winnerIdx, renderPoints[points.length - 1]);
-          return;
-        }
-      }
-      requestAnimationFrame(animateSegment);
-    }
-
-    function getCol(rowIdx) {
-      var count = 0;
-      for (var k = 0; k < rowIdx; k++) if (path[k] === "R") count += 1;
-      return count;
-    }
-
-    requestAnimationFrame(animateSegment);
+  function collideStatic(m, obj, objR, rest, ts) {
+    var dx = m.x - obj.x, dy = m.y - obj.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var minDist = m.r + objR;
+    if (dist >= minDist) return;
+    var nx, ny;
+    if (dist > 0.0001) { nx = dx / dist; ny = dy / dist; } else { nx = 0; ny = -1; }
+    m.x += nx * (minDist - dist);
+    m.y += ny * (minDist - dist);
+    var vn = m.vx * nx + m.vy * ny;
+    if (vn < 0) { m.vx -= (1 + rest) * vn * nx; m.vy -= (1 + rest) * vn * ny; }
+    obj.hitTs = ts;
   }
 
-  function landMarble(winner, winnerIdx, pos) {
-    spawnConfetti(pos.x, layout.slotY + 20);
-    var frames = 0;
-    // The board's geometry (slot count/positions) must stay frozen for the
-    // whole settle animation, since it was computed for winnerIdx — any
-    // roster mutation that changes layout is deferred to onSettled below.
-    function settle(ts) {
-      frames += 1;
-      drawBoard({ landedSlot: winnerIdx, marble: { x: pos.x, y: layout.slotY + 20, squash: 1 }, ts: ts });
-      stepConfetti();
-      if (confetti.length && frames < 90) {
-        requestAnimationFrame(settle);
-      } else {
-        drawBoard({ landedSlot: winnerIdx, ts: ts });
-        onSettled();
+  function collideMarbles(a, b) {
+    var dx = a.x - b.x, dy = a.y - b.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var minDist = a.r + b.r;
+    if (dist >= minDist) return;
+    var nx, ny;
+    if (dist > 0.0001) { nx = dx / dist; ny = dy / dist; } else { nx = 1; ny = 0; }
+    var overlap = (minDist - dist) / 2;
+    a.x += nx * overlap; a.y += ny * overlap;
+    b.x -= nx * overlap; b.y -= ny * overlap;
+    var rvx = a.vx - b.vx, rvy = a.vy - b.vy;
+    var veln = rvx * nx + rvy * ny;
+    if (veln >= 0) return;
+    var imp = -(1 + MARBLE_REST) * veln / 2;
+    a.vx += imp * nx; a.vy += imp * ny;
+    b.vx -= imp * nx; b.vy -= imp * ny;
+  }
+
+  function stepPhysics(marbles, dt, ts) {
+    var sdt = dt / SUBSTEPS;
+    for (var s = 0; s < SUBSTEPS; s++) {
+      marbles.forEach(function (m) { m.vy += GRAVITY * sdt; m.x += m.vx * sdt; m.y += m.vy * sdt; });
+      marbles.forEach(function (m) {
+        if (m.x - m.r < layout.wallLeft) { m.x = layout.wallLeft + m.r; m.vx = Math.abs(m.vx) * WALL_REST; }
+        if (m.x + m.r > layout.wallRight) { m.x = layout.wallRight - m.r; m.vx = -Math.abs(m.vx) * WALL_REST; }
+      });
+      marbles.forEach(function (m) {
+        layout.pegs.forEach(function (p) { collideStatic(m, p, p.r, PEG_REST, ts); });
+        layout.obstacles.forEach(function (ob) { collideStatic(m, ob, ob.collideR, OBSTACLE_REST, ts); });
+      });
+      for (var i = 0; i < marbles.length; i++) {
+        for (var j = i + 1; j < marbles.length; j++) collideMarbles(marbles[i], marbles[j]);
       }
     }
-    requestAnimationFrame(settle);
+  }
 
-    showBanner(winner.name);
-    state.history.push({ name: winner.name, seq: state.history.length + 1 });
+  /* ---------------- Race ---------------- */
+  function startRace() {
+    if (race || state.students.length < 2) return;
+    hideBanner();
+    var order = shuffle(state.students.slice());
+    var n = order.length;
+    var r = marbleRadiusFor(n);
+    var usable = layout.wallRight - layout.wallLeft;
+    var laneW = usable / n;
+    var marbles = order.map(function (student, i) {
+      return {
+        student: student, hue: student.hue,
+        x: layout.wallLeft + laneW * (i + 0.5) + (secureRandomInt(9) - 4),
+        y: layout.introTop + r + 2 + secureRandomInt(8),
+        vx: (secureRandomInt(9) - 4) * 6,
+        vy: 0, r: r
+      };
+    });
+    race = { marbles: marbles, winner: null, settleFrames: 0, lastTs: null };
+    dropBtn.disabled = true;
+    requestAnimationFrame(raceTick);
+  }
+
+  function raceTick(ts) {
+    if (!race) return;
+    if (race.lastTs === null) race.lastTs = ts;
+    var dt = Math.min((ts - race.lastTs) / 1000, 1 / 30);
+    race.lastTs = ts;
+
+    stepPhysics(race.marbles, dt, ts);
+
+    if (!race.winner) {
+      var crossed = race.marbles.filter(function (m) { return m.y >= layout.finishY; });
+      if (crossed.length) {
+        crossed.sort(function (a, b) { return b.y - a.y; });
+        var win = crossed[0];
+        race.winner = win;
+        onRaceWon(win.student, win.x, win.y);
+      }
+    } else {
+      race.settleFrames += 1;
+    }
+
+    drawTrack({
+      ts: ts, marbles: race.marbles, confettiStep: !!race.winner,
+      winnerMarble: race.winner || null
+    });
+
+    if (race.winner && race.settleFrames > 55) {
+      finishRace(race.winner.student);
+    } else {
+      requestAnimationFrame(raceTick);
+    }
+  }
+
+  function onRaceWon(student, x, y) {
+    spawnConfetti(x, y);
+    showBanner(student.name);
+    state.history.push({ name: student.name, seq: state.history.length + 1 });
     renderHistory();
-
     ensureFullRosterSnapshot();
     if (state.removeAfterPick) {
-      var li = rosterList.querySelector('li[data-id="' + winner.id + '"]');
+      var li = rosterList.querySelector('li[data-id="' + student.id + '"]');
       if (li) li.classList.add("leaving");
     }
+  }
 
-    function onSettled() {
-      if (state.removeAfterPick) {
-        state.students = state.students.filter(function (s) { return s.id !== winner.id; });
-        renderRoster();
-        layoutBoard();
-      } else {
-        renderRoster();
-      }
-      saveState();
-      dropping = false;
-      dropBtn.disabled = state.students.length < 2;
+  function finishRace(winnerStudent) {
+    race = null;
+    if (state.removeAfterPick) {
+      state.students = state.students.filter(function (s) { return s.id !== winnerStudent.id; });
     }
+    renderRoster();
+    saveState();
+    requestAnimationFrame(idleLoop);
   }
 
   function showBanner(name) {
@@ -1237,26 +1154,27 @@
     banner.classList.remove("show");
   }
 
-  dropBtn.addEventListener("click", dropMarble);
+  dropBtn.addEventListener("click", startRace);
 
   var resizeTimer = null;
   window.addEventListener("resize", function () {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(layoutBoard, 120);
+    resizeTimer = setTimeout(function () { if (!race) layoutBoard(); }, 120);
   });
 
-  // Keeps the obstacle spinners turning whenever the marble isn't in play —
-  // the drop/settle animations own the canvas the rest of the time.
+  // Keeps the obstacle spinners turning and shows each remaining student's
+  // marble queued up at the start line whenever a race isn't in progress.
   function idleLoop(ts) {
-    if (!dropping) drawBoard({ ts: ts });
+    if (!race) drawTrack({ ts: ts, marbles: idleMarbles() });
     requestAnimationFrame(idleLoop);
   }
 
   /* ---------------- Init ---------------- */
   loadState();
+  state.students.forEach(function (s) { if (s.hue == null) s.hue = nextHue(); else uid += 1; });
   if (!state.students.length) {
     ["Ava", "Noah", "Maya", "Liam", "Zoe", "Kai"].forEach(function (n) {
-      state.students.push({ id: nextId(), name: n });
+      state.students.push({ id: "s" + Date.now() + "_" + (uid + 1), name: n, hue: nextHue() });
     });
   }
   removeToggle.classList.toggle("on", state.removeAfterPick);
