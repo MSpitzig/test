@@ -720,13 +720,36 @@
   }
 
   /* ---------------- Board geometry + drawing ---------------- */
-  var layout = null; // { rows, spacing, rowHeight, centerX, topY, pegR, slots:[{x,name}] }
+  // Peg rows stay at (at least) this count regardless of roster size, so a
+  // small class still gets a full-size board — bins merge and widen instead
+  // of the board shrinking down to almost nothing.
+  var BASE_ROWS = 10;
+  var layout = null; // { rows, spacing, rowHeight, centerX, topY, pegR, slots, slotRanges, obstacles }
   var dpr = Math.max(1, window.devicePixelRatio || 1);
   var dropping = false;
 
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  // Splits `totalBins` lattice positions as evenly as possible across `n`
+  // named slots, so fewer students means each gets a wider slot rather than
+  // the board growing or shrinking pegs.
+  function distributeBins(totalBins, n) {
+    var ranges = [];
+    var base = Math.floor(totalBins / n), rem = totalBins % n;
+    var cursor = 0;
+    for (var i = 0; i < n; i++) {
+      var size = base + (i < rem ? 1 : 0);
+      ranges.push({ start: cursor, end: cursor + size });
+      cursor += size;
+    }
+    return ranges;
+  }
+
   function layoutBoard() {
     var n = state.students.length;
-    var rows = Math.max(1, n - 1);
+    var rows = Math.max(BASE_ROWS, n - 1);
     var frame = canvas.parentElement;
     var maxWidth = Math.min(680, frame.clientWidth - 16 || 560);
     var spacing = Math.max(26, Math.min(58, maxWidth / (rows + 2)));
@@ -734,7 +757,7 @@
     var width = Math.max(maxWidth, boardWidth);
     var rowHeight = Math.max(26, Math.min(42, 380 / (rows + 1)));
     var topPad = 46;
-    var slotRowH = 64;
+    var slotRowH = 128;
     var height = topPad + rowHeight * rows + slotRowH + 20;
 
     canvas.style.width = width + "px";
@@ -744,19 +767,37 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     var centerX = width / 2;
-    var slots = [];
-    for (var j = 0; j <= rows; j++) {
-      var x = centerX + (j - rows / 2) * spacing;
-      slots.push({ x: x, name: n > 1 ? (state.students[j] ? state.students[j].name : "") : "" });
-    }
+
+    var slotRanges = n > 0 ? distributeBins(rows + 1, n) : [];
+    var dividerXAt = function (d) { return centerX + (d - (rows + 1) / 2) * spacing; };
+    var slots = slotRanges.map(function (range, idx) {
+      var left = dividerXAt(range.start), right = dividerXAt(range.end);
+      return { left: left, right: right, x: (left + right) / 2, name: state.students[idx] ? state.students[idx].name : "" };
+    });
+
+    var obstacleDefs = [
+      { fx: 0.22, fy: 0.32, speed: 1.1, phase: 0 },
+      { fx: 0.78, fy: 0.52, speed: -0.8, phase: 2.1 },
+      { fx: 0.4, fy: 0.76, speed: 0.65, phase: 4.4 }
+    ];
+    var obR = Math.max(9, Math.min(15, spacing * 0.38));
+    var fieldLeft = centerX - (rows / 2) * spacing, fieldWidth = rows * spacing;
+    var fieldTop = topPad, fieldHeight = rowHeight * rows;
+    var obstacles = obstacleDefs.map(function (o) {
+      return {
+        x: fieldLeft + o.fx * fieldWidth, y: fieldTop + o.fy * fieldHeight,
+        r: obR, speed: o.speed, phase: o.phase, hitTs: -Infinity, cooldownUntil: 0
+      };
+    });
 
     layout = {
-      rows: rows, spacing: spacing, rowHeight: rowHeight,
+      rows: rows, spacing: spacing, rowHeight: rowHeight, slotRowH: slotRowH,
       centerX: centerX, topY: topPad, pegR: Math.max(3, Math.min(5.5, spacing * 0.11)),
-      slotY: topPad + rowHeight * rows, width: width, height: height, slots: slots
+      slotY: topPad + rowHeight * rows, width: width, height: height,
+      slots: slots, slotRanges: slotRanges, obstacles: obstacles
     };
 
-    drawBoard();
+    drawBoard({ ts: reducedMotion() ? undefined : performance.now() });
   }
 
   function pegPos(i, j) {
@@ -764,6 +805,10 @@
       x: layout.centerX + (j - i / 2) * layout.spacing,
       y: layout.topY + i * layout.rowHeight
     };
+  }
+
+  function latticeX(j) {
+    return layout.centerX + (j - layout.rows / 2) * layout.spacing;
   }
 
   function drawPeg(x, y, glow) {
@@ -788,6 +833,59 @@
     }
   }
 
+  function drawSpinner(ob, ts) {
+    var angle = (ts || 0) / 1000 * ob.speed + ob.phase;
+    var hit = (ts || 0) - ob.hitTs < 260;
+
+    ctx.save();
+    ctx.translate(ob.x, ob.y);
+    ctx.rotate(angle);
+    for (var k = 0; k < 4; k++) {
+      ctx.save();
+      ctx.rotate(k * Math.PI / 2);
+      var blade = ctx.createLinearGradient(0, 0, ob.r, 0);
+      if (hit) { blade.addColorStop(0, "#fff2c8"); blade.addColorStop(1, "#f37b57"); }
+      else { blade.addColorStop(0, "rgba(217,164,65,0.9)"); blade.addColorStop(1, "rgba(169,123,40,0.15)"); }
+      ctx.fillStyle = blade;
+      ctx.beginPath();
+      ctx.moveTo(0, -ob.r * 0.16);
+      ctx.lineTo(ob.r, 0);
+      ctx.lineTo(0, ob.r * 0.16);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+
+    var hub = ctx.createRadialGradient(ob.x - ob.r * 0.3, ob.y - ob.r * 0.3, 0.5, ob.x, ob.y, ob.r * 0.5);
+    hub.addColorStop(0, hit ? "#fff2c8" : "#f6d488");
+    hub.addColorStop(1, hit ? "#e2532f" : "#a97b28");
+    ctx.beginPath();
+    ctx.arc(ob.x, ob.y, ob.r * 0.42, 0, Math.PI * 2);
+    ctx.fillStyle = hub;
+    ctx.fill();
+
+    if (hit) {
+      ctx.beginPath();
+      ctx.arc(ob.x, ob.y, ob.r * 1.7, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,215,122,0.22)";
+      ctx.fill();
+    }
+  }
+
+  // Trims a name to fit maxWidth px, assuming ctx.font is already set to the
+  // font it will be drawn with.
+  function fitLabel(name, maxWidth) {
+    if (ctx.measureText(name).width <= maxWidth) return name;
+    var lo = 0, hi = name.length;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (ctx.measureText(name.slice(0, mid) + "…").width <= maxWidth) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo > 0 ? name.slice(0, lo) + "…" : "…";
+  }
+
   function drawBoard(opts) {
     opts = opts || {};
     if (!layout) return;
@@ -810,23 +908,28 @@
       }
     }
 
-    // slot dividers + labels
+    // spinning obstacles, scattered among the pegs
+    layout.obstacles.forEach(function (ob) { drawSpinner(ob, opts.ts); });
+
+    // fine bin dividers (every lattice position the marble can actually land on)
     var dividerTop = layout.slotY;
-    var dividerBottom = layout.slotY + 56;
-    ctx.lineWidth = 2;
-    layout.slots.forEach(function (s, idx) {
-      var leftX = s.x - layout.spacing / 2;
-      if (idx === 0 || idx === layout.slots.length) return;
-    });
+    var dividerBottom = layout.slotY + layout.slotRowH - 14;
+    var labelMaxLen = dividerBottom - dividerTop - 14;
+    ctx.lineWidth = 1;
     for (var d = 0; d <= layout.rows + 1; d++) {
       var dx = layout.centerX + (d - (layout.rows + 1) / 2) * layout.spacing;
-      ctx.strokeStyle = "rgba(217,164,65,0.35)";
+      ctx.strokeStyle = "rgba(217,164,65,0.18)";
       ctx.beginPath(); ctx.moveTo(dx, dividerTop); ctx.lineTo(dx, dividerBottom); ctx.stroke();
     }
+
+    // named slots, each spanning one or more of those fine bins
+    ctx.lineWidth = 2;
     layout.slots.forEach(function (s, idx) {
       var highlighted = opts.landedSlot === idx;
       ctx.fillStyle = highlighted ? "rgba(226,83,47,0.28)" : "rgba(244,236,216,0.035)";
-      ctx.fillRect(s.x - layout.spacing / 2 + 1, dividerTop, layout.spacing - 2, dividerBottom - dividerTop);
+      ctx.fillRect(s.left + 1, dividerTop, s.right - s.left - 2, dividerBottom - dividerTop);
+      ctx.strokeStyle = "rgba(217,164,65,0.5)";
+      ctx.strokeRect(s.left + 1, dividerTop, s.right - s.left - 2, dividerBottom - dividerTop);
 
       ctx.save();
       ctx.translate(s.x, dividerBottom - 10);
@@ -835,8 +938,7 @@
       ctx.font = (highlighted ? "700 " : "600 ") + Math.max(10, Math.min(13, layout.spacing * 0.26)) + "px Manrope, sans-serif";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      var label = s.name.length > 14 ? s.name.slice(0, 13) + "…" : s.name;
-      ctx.fillText(label, 0, 0);
+      ctx.fillText(fitLabel(s.name, labelMaxLen), 0, 0);
       ctx.restore();
     });
 
@@ -900,6 +1002,7 @@
 
   /* ---------------- Drop animation ---------------- */
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInQuad(t) { return t * t; }
 
   function dropMarble() {
     if (dropping || state.students.length < 2) return;
@@ -910,33 +1013,64 @@
     var winnerIdx = secureRandomInt(state.students.length);
     var winner = state.students[winnerIdx];
     var rows = layout.rows;
-    var path = buildPath(rows, winnerIdx);
+    var range = layout.slotRanges[winnerIdx];
+    // Any lattice position inside the winner's slot lands correctly — which
+    // exact one is purely cosmetic, since the student was already chosen
+    // fairly above, before the visual path exists.
+    var targetLattice = range.start + secureRandomInt(range.end - range.start);
+    var path = buildPath(rows, targetLattice);
 
-    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var perRow = reduced ? 1 : Math.max(70, Math.min(190, 2600 / rows));
+    var reduced = reducedMotion();
+    var perRow = reduced ? 1 : Math.max(220, Math.min(480, 4600 / rows));
 
     // sequence of lattice positions the marble visits, row 0..rows
     var points = [pegPos(0, 0)];
     var j = 0;
     for (var i = 0; i < rows; i++) {
       if (path[i] === "R") j += 1;
-      points.push(i + 1 === rows ? { x: layout.slots[j].x, y: layout.slotY - 6 } : pegPos(i + 1, j));
+      points.push(i + 1 === rows ? { x: latticeX(j), y: layout.slotY - 6 } : pegPos(i + 1, j));
     }
 
     var segIndex = 0;
     var segStart = null;
+    var hopHeight = layout.rowHeight * 0.6;
+
+    // The spinning obstacles cosmetically knock the marble sideways on
+    // contact — it's a spring that snaps back toward zero, layered on top
+    // of the real (fixed) path, so it never changes where the marble
+    // actually ends up.
+    var bumpX = 0, bumpVX = 0;
+    function applyObstacleHits(mx, my, ts) {
+      layout.obstacles.forEach(function (ob) {
+        if (ts < ob.cooldownUntil) return;
+        var dx = mx - ob.x, dy = my - ob.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var hitDist = ob.r * 0.85 + layout.pegR * 2.1 * 0.9;
+        if (dist < hitDist) {
+          ob.hitTs = ts;
+          ob.cooldownUntil = ts + 380;
+          var nx = dist > 0.001 ? dx / dist : (Math.random() < 0.5 ? -1 : 1);
+          bumpVX += nx * (hitDist - dist + 10) * 0.9;
+        }
+      });
+    }
 
     function animateSegment(ts) {
       if (segStart === null) segStart = ts;
       var t = reduced ? 1 : Math.min(1, (ts - segStart) / perRow);
       var from = points[segIndex], to = points[segIndex + 1];
-      var eased = easeOutCubic(t);
-      var mx = from.x + (to.x - from.x) * eased;
-      var my = from.y + (to.y - from.y) * t; // linear fall, eased horizontal
-      var squash = 1 + Math.sin(t * Math.PI) * 0.12;
+      var mx = from.x + (to.x - from.x) * easeOutCubic(t);
+      // parabolic hop: falls toward the next peg but arcs up over it mid-flight,
+      // like the marble actually leaving the peg it just hit
+      var my = from.y + (to.y - from.y) * t - hopHeight * 4 * t * (1 - t);
+      // stretches in the air, snaps flat on impact with the next peg
+      var squash = 1 + Math.sin(t * Math.PI) * 0.22 - 0.3 * Math.pow(t, 6);
 
-      var hotPeg = segIndex < rows ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
-      drawBoard({ marble: { x: mx, y: my, squash: squash } });
+      applyObstacleHits(mx, my, ts);
+      bumpVX *= 0.85; bumpX += bumpVX; bumpX *= 0.88;
+
+      var hotPeg = (t > 0.8 && segIndex < rows) ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
+      drawBoard({ marble: { x: mx + bumpX, y: my, squash: squash }, hotPeg: hotPeg, ts: ts });
 
       if (t >= 1) {
         segIndex += 1;
@@ -964,14 +1098,14 @@
     // The board's geometry (slot count/positions) must stay frozen for the
     // whole settle animation, since it was computed for winnerIdx — any
     // roster mutation that changes layout is deferred to onSettled below.
-    function settle() {
+    function settle(ts) {
       frames += 1;
-      drawBoard({ landedSlot: winnerIdx, marble: { x: pos.x, y: layout.slotY + 20, squash: 1 } });
+      drawBoard({ landedSlot: winnerIdx, marble: { x: pos.x, y: layout.slotY + 20, squash: 1 }, ts: ts });
       stepConfetti();
       if (confetti.length && frames < 90) {
         requestAnimationFrame(settle);
       } else {
-        drawBoard({ landedSlot: winnerIdx });
+        drawBoard({ landedSlot: winnerIdx, ts: ts });
         onSettled();
       }
     }
@@ -1017,6 +1151,13 @@
     resizeTimer = setTimeout(layoutBoard, 120);
   });
 
+  // Keeps the obstacle spinners turning whenever the marble isn't in play —
+  // the drop/settle animations own the canvas the rest of the time.
+  function idleLoop(ts) {
+    if (!dropping) drawBoard({ ts: ts });
+    requestAnimationFrame(idleLoop);
+  }
+
   /* ---------------- Init ---------------- */
   loadState();
   if (!state.students.length) {
@@ -1029,6 +1170,7 @@
   renderRoster();
   renderHistory();
   layoutBoard();
+  if (!reducedMotion()) requestAnimationFrame(idleLoop);
 })();
 </script>
 </body>
