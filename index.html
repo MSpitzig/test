@@ -728,10 +728,6 @@
   var dpr = Math.max(1, window.devicePixelRatio || 1);
   var dropping = false;
 
-  function reducedMotion() {
-    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-  }
-
   // Splits `totalBins` lattice positions as evenly as possible across `n`
   // named slots, so fewer students means each gets a wider slot rather than
   // the board growing or shrinking pegs.
@@ -780,7 +776,7 @@
       { fx: 0.78, fy: 0.52, speed: -0.8, phase: 2.1 },
       { fx: 0.4, fy: 0.76, speed: 0.65, phase: 4.4 }
     ];
-    var obR = Math.max(9, Math.min(15, spacing * 0.38));
+    var obR = Math.max(16, Math.min(30, spacing * 0.6));
     var fieldLeft = centerX - (rows / 2) * spacing, fieldWidth = rows * spacing;
     var fieldTop = topPad, fieldHeight = rowHeight * rows;
     var obstacles = obstacleDefs.map(function (o) {
@@ -797,7 +793,7 @@
       slots: slots, slotRanges: slotRanges, obstacles: obstacles
     };
 
-    drawBoard({ ts: reducedMotion() ? undefined : performance.now() });
+    drawBoard({ ts: performance.now() });
   }
 
   function pegPos(i, j) {
@@ -1001,9 +997,6 @@
   }
 
   /* ---------------- Drop animation ---------------- */
-  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-  function easeInQuad(t) { return t * t; }
-
   function dropMarble() {
     if (dropping || state.students.length < 2) return;
     dropping = true;
@@ -1020,9 +1013,6 @@
     var targetLattice = range.start + secureRandomInt(range.end - range.start);
     var path = buildPath(rows, targetLattice);
 
-    var reduced = reducedMotion();
-    var perRow = reduced ? 1 : Math.max(220, Math.min(480, 4600 / rows));
-
     // sequence of lattice positions the marble visits, row 0..rows
     var points = [pegPos(0, 0)];
     var j = 0;
@@ -1031,9 +1021,26 @@
       points.push(i + 1 === rows ? { x: latticeX(j), y: layout.slotY - 6 } : pegPos(i + 1, j));
     }
 
+    // Real kinematics: constant gravity, and each peg impact keeps a
+    // fraction of the marble's vertical speed (a lossy bounce) rather than
+    // resetting to rest — so it falls slower off the apex and quickens
+    // hop over hop, the way something actually bouncing downhill would.
+    // g scales with rowHeight so pacing stays consistent across board sizes.
+    var rowHeight = layout.rowHeight;
+    var g = rowHeight * 10;
+    var restitution = 0.42;
+    var hopDur = [], hopVy0 = [];
+    var vy0 = 0;
+    for (var hi = 0; hi < rows; hi++) {
+      var T = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * rowHeight)) / g;
+      hopDur.push(T);
+      hopVy0.push(vy0);
+      var vyImpact = vy0 + g * T;
+      vy0 = restitution * vyImpact;
+    }
+
     var segIndex = 0;
     var segStart = null;
-    var hopHeight = layout.rowHeight * 0.6;
 
     // The spinning obstacles cosmetically knock the marble sideways on
     // contact — it's a spring that snaps back toward zero, layered on top
@@ -1057,22 +1064,27 @@
 
     function animateSegment(ts) {
       if (segStart === null) segStart = ts;
-      var t = reduced ? 1 : Math.min(1, (ts - segStart) / perRow);
       var from = points[segIndex], to = points[segIndex + 1];
-      var mx = from.x + (to.x - from.x) * easeOutCubic(t);
-      // parabolic hop: falls toward the next peg but arcs up over it mid-flight,
-      // like the marble actually leaving the peg it just hit
-      var my = from.y + (to.y - from.y) * t - hopHeight * 4 * t * (1 - t);
-      // stretches in the air, snaps flat on impact with the next peg
-      var squash = 1 + Math.sin(t * Math.PI) * 0.22 - 0.3 * Math.pow(t, 6);
+      var T = hopDur[segIndex], v0 = hopVy0[segIndex];
+      var elapsedSec = Math.min((ts - segStart) / 1000, T);
+      var u = T > 0 ? elapsedSec / T : 1;
+
+      var mx = from.x + (to.x - from.x) * u;
+      // actual kinematics — starts at the speed carried over from the last
+      // bounce and accelerates under gravity for the rest of the hop
+      var my = from.y + v0 * elapsedSec + 0.5 * g * elapsedSec * elapsedSec;
+      var currentVy = v0 + g * elapsedSec;
+      var vyImpact = v0 + g * T;
+      // stretches more the faster it's actually falling, flattens on impact
+      var squash = 1 + 0.22 * (vyImpact > 0 ? currentVy / vyImpact : 0) - 0.3 * Math.pow(u, 6);
 
       applyObstacleHits(mx, my, ts);
       bumpVX *= 0.85; bumpX += bumpVX; bumpX *= 0.88;
 
-      var hotPeg = (t > 0.8 && segIndex < rows) ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
+      var hotPeg = (u > 0.85 && segIndex < rows) ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
       drawBoard({ marble: { x: mx + bumpX, y: my, squash: squash }, hotPeg: hotPeg, ts: ts });
 
-      if (t >= 1) {
+      if (u >= 1) {
         segIndex += 1;
         segStart = null;
         if (segIndex >= points.length - 1) {
@@ -1170,7 +1182,7 @@
   renderRoster();
   renderHistory();
   layoutBoard();
-  if (!reducedMotion()) requestAnimationFrame(idleLoop);
+  requestAnimationFrame(idleLoop);
 })();
 </script>
 </body>
