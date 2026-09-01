@@ -771,18 +771,26 @@
       return { left: left, right: right, x: (left + right) / 2, name: state.students[idx] ? state.students[idx].name : "" };
     });
 
+    // Positioned relative to the triangle's actual width AT THAT ROW (which
+    // narrows toward the apex), not the full board width, so they always
+    // land inside the peg pyramid instead of floating off past its edge.
+    // fx is a fraction of that row's half-width (-1..1), fy a fraction of
+    // the rows from apex to base.
     var obstacleDefs = [
-      { fx: 0.22, fy: 0.32, speed: 1.1, phase: 0 },
-      { fx: 0.78, fy: 0.52, speed: -0.8, phase: 2.1 },
-      { fx: 0.4, fy: 0.76, speed: 0.65, phase: 4.4 }
+      { fx: -0.55, fy: 0.4, speed: 1.1, phase: 0 },
+      { fx: 0.6, fy: 0.58, speed: -0.8, phase: 2.1 },
+      { fx: -0.15, fy: 0.8, speed: 0.65, phase: 4.4 }
     ];
-    var obR = Math.max(16, Math.min(30, spacing * 0.6));
-    var fieldLeft = centerX - (rows / 2) * spacing, fieldWidth = rows * spacing;
-    var fieldTop = topPad, fieldHeight = rowHeight * rows;
+    var hubR = Math.max(6, Math.min(11, spacing * 0.22));
+    var bladeLen = Math.max(30, Math.min(58, spacing * 1.2));
     var obstacles = obstacleDefs.map(function (o) {
+      var rowAtFy = o.fy * rows;
+      var localHalfWidth = (rowAtFy / 2) * spacing;
       return {
-        x: fieldLeft + o.fx * fieldWidth, y: fieldTop + o.fy * fieldHeight,
-        r: obR, speed: o.speed, phase: o.phase, hitTs: -Infinity, cooldownUntil: 0
+        x: centerX + o.fx * localHalfWidth * 0.5,
+        y: topPad + rowAtFy * rowHeight,
+        hubR: hubR, bladeLen: bladeLen, speed: o.speed, phase: o.phase,
+        hitTs: -Infinity, cooldownUntil: 0
       };
     });
 
@@ -832,6 +840,7 @@
   function drawSpinner(ob, ts) {
     var angle = (ts || 0) / 1000 * ob.speed + ob.phase;
     var hit = (ts || 0) - ob.hitTs < 260;
+    var len = ob.bladeLen;
 
     ctx.save();
     ctx.translate(ob.x, ob.y);
@@ -839,32 +848,32 @@
     for (var k = 0; k < 4; k++) {
       ctx.save();
       ctx.rotate(k * Math.PI / 2);
-      var blade = ctx.createLinearGradient(0, 0, ob.r, 0);
+      var blade = ctx.createLinearGradient(0, 0, len, 0);
       if (hit) { blade.addColorStop(0, "#fff2c8"); blade.addColorStop(1, "#f37b57"); }
-      else { blade.addColorStop(0, "rgba(217,164,65,0.9)"); blade.addColorStop(1, "rgba(169,123,40,0.15)"); }
+      else { blade.addColorStop(0, "rgba(217,164,65,0.9)"); blade.addColorStop(1, "rgba(169,123,40,0.12)"); }
       ctx.fillStyle = blade;
       ctx.beginPath();
-      ctx.moveTo(0, -ob.r * 0.16);
-      ctx.lineTo(ob.r, 0);
-      ctx.lineTo(0, ob.r * 0.16);
+      ctx.moveTo(0, -ob.hubR * 0.5);
+      ctx.lineTo(len, 0);
+      ctx.lineTo(0, ob.hubR * 0.5);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
     }
     ctx.restore();
 
-    var hub = ctx.createRadialGradient(ob.x - ob.r * 0.3, ob.y - ob.r * 0.3, 0.5, ob.x, ob.y, ob.r * 0.5);
+    var hub = ctx.createRadialGradient(ob.x - ob.hubR * 0.3, ob.y - ob.hubR * 0.3, 0.5, ob.x, ob.y, ob.hubR);
     hub.addColorStop(0, hit ? "#fff2c8" : "#f6d488");
     hub.addColorStop(1, hit ? "#e2532f" : "#a97b28");
     ctx.beginPath();
-    ctx.arc(ob.x, ob.y, ob.r * 0.42, 0, Math.PI * 2);
+    ctx.arc(ob.x, ob.y, ob.hubR, 0, Math.PI * 2);
     ctx.fillStyle = hub;
     ctx.fill();
 
     if (hit) {
       ctx.beginPath();
-      ctx.arc(ob.x, ob.y, ob.r * 1.7, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(255,215,122,0.22)";
+      ctx.arc(ob.x, ob.y, len * 0.9, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,215,122,0.16)";
       ctx.fill();
     }
   }
@@ -944,23 +953,39 @@
 
   function drawMarble(x, y, squash) {
     squash = squash || 1;
+    var r = layout.pegR * 2.1;
+
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 1.05, r * 0.9, r * 0.25, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.fill();
+
     ctx.save();
     ctx.translate(x, y);
     ctx.scale(1 / squash, squash);
-    var r = layout.pegR * 2.1;
-    var grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0.5, 0, 0, r * 1.3);
-    grad.addColorStop(0, "#ffffff");
-    grad.addColorStop(0.4, "#f4ecd8");
-    grad.addColorStop(1, "#c9bd9c");
+    // polished-steel shading: a tight bright highlight, a hard falloff into
+    // mid-tone, and a distinctly dark rim — reads as a solid sphere rather
+    // than a flat, soft disc
+    var body = ctx.createRadialGradient(-r * 0.35, -r * 0.4, r * 0.05, 0, 0, r * 1.05);
+    body.addColorStop(0, "#ffffff");
+    body.addColorStop(0.22, "#eef1f0");
+    body.addColorStop(0.55, "#aab0ae");
+    body.addColorStop(0.85, "#5c6260");
+    body.addColorStop(1, "#2c302f");
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
+    ctx.fillStyle = body;
+    ctx.fill();
+    ctx.lineWidth = Math.max(0.75, r * 0.06);
+    ctx.strokeStyle = "rgba(10,12,11,0.55)";
+    ctx.stroke();
+
+    // small crisp specular dot on top of the soft highlight, for extra shine
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.32, -r * 0.4, r * 0.22, r * 0.14, -0.6, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.85)";
     ctx.fill();
     ctx.restore();
-    ctx.beginPath();
-    ctx.ellipse(x, y + r * 1.05, r * 0.9, r * 0.25, 0, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0,0,0,0.25)";
-    ctx.fill();
   }
 
   /* ---------------- Confetti ---------------- */
@@ -1021,14 +1046,14 @@
       points.push(i + 1 === rows ? { x: latticeX(j), y: layout.slotY - 6 } : pegPos(i + 1, j));
     }
 
-    // Real kinematics: constant gravity, and each peg impact keeps a
-    // fraction of the marble's vertical speed (a lossy bounce) rather than
-    // resetting to rest — so it falls slower off the apex and quickens
-    // hop over hop, the way something actually bouncing downhill would.
+    // Real kinematics: constant gravity, and each peg impact reflects the
+    // marble's downward velocity back upward (losing some of it, a real
+    // bounce) instead of just carrying it forward — so it actually rises
+    // off each peg before gravity pulls it back down to the next one.
     // g scales with rowHeight so pacing stays consistent across board sizes.
     var rowHeight = layout.rowHeight;
-    var g = rowHeight * 10;
-    var restitution = 0.42;
+    var g = rowHeight * 14;
+    var restitution = 0.32;
     var hopDur = [], hopVy0 = [];
     var vy0 = 0;
     for (var hi = 0; hi < rows; hi++) {
@@ -1036,7 +1061,7 @@
       hopDur.push(T);
       hopVy0.push(vy0);
       var vyImpact = vy0 + g * T;
-      vy0 = restitution * vyImpact;
+      vy0 = -restitution * vyImpact;
     }
 
     var segIndex = 0;
@@ -1052,12 +1077,13 @@
         if (ts < ob.cooldownUntil) return;
         var dx = mx - ob.x, dy = my - ob.y;
         var dist = Math.sqrt(dx * dx + dy * dy);
-        var hitDist = ob.r * 0.85 + layout.pegR * 2.1 * 0.9;
+        // the long spinning blades are the actual hit zone, not just the hub
+        var hitDist = ob.bladeLen * 0.9 + layout.pegR * 2.1;
         if (dist < hitDist) {
           ob.hitTs = ts;
           ob.cooldownUntil = ts + 380;
           var nx = dist > 0.001 ? dx / dist : (Math.random() < 0.5 ? -1 : 1);
-          bumpVX += nx * (hitDist - dist + 10) * 0.9;
+          bumpVX += nx * (hitDist - dist + 22) * 1.3;
         }
       });
     }
