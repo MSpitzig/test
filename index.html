@@ -752,7 +752,9 @@
     var boardWidth = spacing * (rows + 1) + spacing * 2;
     var width = Math.max(maxWidth, boardWidth);
     var rowHeight = Math.max(26, Math.min(42, 380 / (rows + 1)));
-    var topPad = 46;
+    var introTop = 30;
+    var introHeight = rowHeight * 3.4;
+    var topPad = introTop + introHeight;
     var slotRowH = 128;
     var height = topPad + rowHeight * rows + slotRowH + 20;
 
@@ -771,32 +773,50 @@
       return { left: left, right: right, x: (left + right) / 2, name: state.students[idx] ? state.students[idx].name : "" };
     });
 
-    // Positioned relative to the triangle's actual width AT THAT ROW (which
-    // narrows toward the apex), not the full board width, so they always
-    // land inside the peg pyramid instead of floating off past its edge.
-    // fx is a fraction of that row's half-width (-1..1), fy a fraction of
-    // the rows from apex to base.
+    // The peg field now fills a full rectangle (not a narrowing triangle),
+    // so its half-width is constant at every row — obstacles just place
+    // freely within it. fx is a fraction of that constant half-width
+    // (-1..1), fy a fraction of the rows from apex to base.
     var obstacleDefs = [
-      { fx: -0.55, fy: 0.4, speed: 1.1, phase: 0 },
-      { fx: 0.6, fy: 0.58, speed: -0.8, phase: 2.1 },
-      { fx: -0.15, fy: 0.8, speed: 0.65, phase: 4.4 }
+      { fx: -0.6, fy: 0.22, speed: 1.1, phase: 0 },
+      { fx: 0.68, fy: 0.3, speed: -0.9, phase: 2.1 },
+      { fx: 0, fy: 0.5, speed: 0.7, phase: 1.6 },
+      { fx: -0.72, fy: 0.68, speed: -0.6, phase: 3.4 },
+      { fx: 0.55, fy: 0.82, speed: 0.85, phase: 4.4 }
     ];
     var hubR = Math.max(6, Math.min(11, spacing * 0.22));
     var bladeLen = Math.max(30, Math.min(58, spacing * 1.2));
+    var rectHalfWidth = ((rows - 1) / 2) * spacing;
     var obstacles = obstacleDefs.map(function (o) {
-      var rowAtFy = o.fy * rows;
-      var localHalfWidth = (rowAtFy / 2) * spacing;
       return {
-        x: centerX + o.fx * localHalfWidth * 0.5,
-        y: topPad + rowAtFy * rowHeight,
+        x: centerX + o.fx * rectHalfWidth * 0.68,
+        y: topPad + o.fy * rowHeight * (rows - 1),
         hubR: hubR, bladeLen: bladeLen, speed: o.speed, phase: o.phase,
         hitTs: -Infinity, cooldownUntil: 0
       };
     });
 
+    // A couple of bouncers in the open-air release zone above the peg
+    // forest, so the marble tumbles through something before it ever
+    // reaches the first row of pegs.
+    var introBouncerDefs = [
+      { fx: -0.42, fy: 0.4, speed: 0.85, phase: 0.6 },
+      { fx: 0.4, fy: 0.72, speed: -0.7, phase: 3.1 }
+    ];
+    var introBladeLen = Math.max(22, Math.min(40, spacing * 0.85));
+    introBouncerDefs.forEach(function (o) {
+      obstacles.push({
+        x: centerX + o.fx * rectHalfWidth * 0.68,
+        y: introTop + o.fy * introHeight,
+        hubR: hubR * 0.85, bladeLen: introBladeLen, speed: o.speed, phase: o.phase,
+        hitTs: -Infinity, cooldownUntil: 0
+      });
+    });
+
     layout = {
       rows: rows, spacing: spacing, rowHeight: rowHeight, slotRowH: slotRowH,
-      centerX: centerX, topY: topPad, pegR: Math.max(3, Math.min(5.5, spacing * 0.11)),
+      centerX: centerX, topY: topPad, introTop: introTop, introHeight: introHeight,
+      pegR: Math.max(3, Math.min(5.5, spacing * 0.11)),
       slotY: topPad + rowHeight * rows, width: width, height: height,
       slots: slots, slotRanges: slotRanges, obstacles: obstacles
     };
@@ -815,8 +835,15 @@
     return layout.centerX + (j - layout.rows / 2) * layout.spacing;
   }
 
-  function drawPeg(x, y, glow) {
-    var r = layout.pegR;
+  function drawPeg(x, y, glow, dim) {
+    var r = dim ? layout.pegR * 0.62 : layout.pegR;
+    if (dim) {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(217,164,65,0.28)";
+      ctx.fill();
+      return;
+    }
     var grad = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, 0.3, x, y, r * 1.4);
     if (glow) {
       grad.addColorStop(0, "#fff2c8");
@@ -904,12 +931,18 @@
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
     }
 
-    // pegs
-    for (var i = 0; i < layout.rows; i++) {
-      for (var j = 0; j <= i; j++) {
+    // pegs — the triangle the marble actually bounces through, filled out
+    // to a full rectangle with smaller, dimmer decorative pegs using the
+    // same lattice formula so the pattern reads as one continuous grid
+    var rows = layout.rows;
+    var halfSpan = (rows - 1) / 2;
+    for (var i = 0; i < rows; i++) {
+      var jMin = Math.ceil(i / 2 - halfSpan), jMax = Math.floor(i / 2 + halfSpan);
+      for (var j = jMin; j <= jMax; j++) {
         var p = pegPos(i, j);
-        var isHot = opts.hotPeg && opts.hotPeg.row === i && opts.hotPeg.col === j;
-        drawPeg(p.x, p.y, isHot);
+        var isReal = j >= 0 && j <= i;
+        var isHot = isReal && opts.hotPeg && opts.hotPeg.row === i && opts.hotPeg.col === j;
+        drawPeg(p.x, p.y, isHot, !isReal);
       }
     }
 
@@ -1038,8 +1071,9 @@
     var targetLattice = range.start + secureRandomInt(range.end - range.start);
     var path = buildPath(rows, targetLattice);
 
-    // sequence of lattice positions the marble visits, row 0..rows
-    var points = [pegPos(0, 0)];
+    // sequence of positions the marble visits: released above the pegs,
+    // free-falls to the apex, then lattice positions for row 0..rows
+    var points = [{ x: layout.centerX, y: layout.introTop }, pegPos(0, 0)];
     var j = 0;
     for (var i = 0; i < rows; i++) {
       if (path[i] === "R") j += 1;
@@ -1051,13 +1085,18 @@
     // bounce) instead of just carrying it forward — so it actually rises
     // off each peg before gravity pulls it back down to the next one.
     // g scales with rowHeight so pacing stays consistent across board sizes.
+    // The first hop is the long release-height free-fall, everything after
+    // is a normal row-to-row hop.
     var rowHeight = layout.rowHeight;
     var g = rowHeight * 14;
     var restitution = 0.32;
+    var hopDistances = [layout.introHeight];
+    for (var hd = 0; hd < rows; hd++) hopDistances.push(rowHeight);
     var hopDur = [], hopVy0 = [];
     var vy0 = 0;
-    for (var hi = 0; hi < rows; hi++) {
-      var T = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * rowHeight)) / g;
+    for (var hi = 0; hi < hopDistances.length; hi++) {
+      var d = hopDistances[hi];
+      var T = (-vy0 + Math.sqrt(vy0 * vy0 + 2 * g * d)) / g;
       hopDur.push(T);
       hopVy0.push(vy0);
       var vyImpact = vy0 + g * T;
@@ -1107,7 +1146,7 @@
       applyObstacleHits(mx, my, ts);
       bumpVX *= 0.85; bumpX += bumpVX; bumpX *= 0.88;
 
-      var hotPeg = (u > 0.85 && segIndex < rows) ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
+      var hotPeg = (u > 0.85 && segIndex < rows) ? { row: segIndex, col: getCol(segIndex) } : null;
       drawBoard({ marble: { x: mx + bumpX, y: my, squash: squash }, hotPeg: hotPeg, ts: ts });
 
       if (u >= 1) {
