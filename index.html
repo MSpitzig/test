@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Plinko Picker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Manrope:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cabinet: #0b1410;
+    --cabinet-rail: #0e1a14;
+    --felt: #123a2c;
+    --felt-deep: #0a2a20;
+    --felt-line: rgba(244, 236, 216, 0.08);
+    --brass: #d9a441;
+    --brass-hi: #f6d488;
+    --brass-low: #a97b28;
+    --ivory: #f4ecd8;
+    --ivory-dim: #cfc6ac;
+    --muted: #93a99b;
+    --panel: #142019;
+    --panel-raised: #182620;
+    --vermilion: #e2532f;
+    --vermilion-hi: #f37b57;
+    --win-glow: #ffd77a;
+    --danger: #d9604a;
+    --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+    --font-body: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: radial-gradient(ellipse 120% 90% at 50% -10%, #16241c 0%, var(--cabinet) 55%, #070c09 100%);
+    color: var(--ivory);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  a { color: var(--vermilion-hi); }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+  }
+
+  header.hero {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--brass-hi);
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .eyebrow::before, .eyebrow::after {
+    content: "";
+    width: 28px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--brass-low));
+  }
+  .eyebrow::after { background: linear-gradient(90deg, var(--brass-low), transparent); }
+
+  h1.title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(2.4rem, 5vw, 3.6rem);
+    margin: 10px 0 8px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+    color: var(--ivory);
+    text-shadow: 0 2px 0 rgba(0,0,0,0.35);
+  }
+
+  p.tagline {
+    color: var(--muted);
+    font-size: 1.05rem;
+    max-width: 46ch;
+    margin: 0 auto;
+    text-wrap: balance;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel-raised), var(--panel));
+    border: 1px solid rgba(244, 236, 216, 0.08);
+    border-radius: 18px;
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.03);
+    padding: 22px;
+  }
+
+  /* ---- Board ---- */
+  .board-card { position: relative; }
+
+  .board-frame {
+    position: relative;
+    border-radius: 14px;
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(255,255,255,0.05), transparent 55%),
+      linear-gradient(180deg, var(--felt), var(--felt-deep));
+    border: 10px solid var(--cabinet-rail);
+    box-shadow: inset 0 0 0 1px rgba(217, 164, 65, 0.25), inset 0 12px 30px rgba(0,0,0,0.45);
+    overflow: auto;
+    padding: 8px;
+  }
+
+  canvas#board {
+    display: block;
+    margin: 0 auto;
+  }
+
+  .board-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .pill {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    color: var(--felt-deep);
+    background: var(--brass);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+
+  .board-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 18px;
+  }
+
+  button.drop-btn {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+    color: var(--felt-deep);
+    background: linear-gradient(180deg, var(--brass-hi), var(--brass));
+    border: none;
+    border-radius: 999px;
+    padding: 14px 34px;
+    cursor: pointer;
+    box-shadow: 0 8px 0 var(--brass-low), 0 14px 24px -8px rgba(0,0,0,0.5);
+    transition: transform 0.08s ease, box-shadow 0.08s ease;
+  }
+  button.drop-btn:hover:not(:disabled) { transform: translateY(-1px); }
+  button.drop-btn:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 4px 0 var(--brass-low), 0 8px 16px -8px rgba(0,0,0,0.5);
+  }
+  button.drop-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: 0 6px 0 rgba(169,123,40,0.5);
+  }
+  button.drop-btn:focus-visible, .icon-btn:focus-visible, input:focus-visible, .toggle:focus-visible, .name-input:focus-visible {
+    outline: 2px solid var(--vermilion-hi);
+    outline-offset: 2px;
+  }
+
+  .empty-note {
+    text-align: center;
+    color: var(--ivory-dim);
+    font-size: 0.9rem;
+    margin-top: 10px;
+    min-height: 1.2em;
+  }
+
+  /* Winner banner */
+  .banner {
+    position: absolute;
+    left: 50%;
+    top: 18px;
+    transform: translate(-50%, -14px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    background: linear-gradient(180deg, #1b2b22, #0f1d16);
+    border: 1px solid var(--brass-low);
+    border-radius: 12px;
+    padding: 12px 22px;
+    text-align: center;
+    box-shadow: 0 16px 40px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,215,122,0.08);
+    z-index: 5;
+  }
+  .banner.show { opacity: 1; transform: translate(-50%, 0); }
+  .banner .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--win-glow);
+  }
+  .banner .winner-name {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.6rem;
+    color: var(--ivory);
+    margin-top: 2px;
+  }
+
+  /* ---- Sidebar ---- */
+  .sidebar { display: flex; flex-direction: column; gap: 18px; }
+
+  .card h2 {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 14px;
+    color: var(--ivory);
+  }
+
+  .add-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .name-input {
+    flex: 1;
+    background: var(--felt-deep);
+    border: 1px solid rgba(244,236,216,0.12);
+    color: var(--ivory);
+    border-radius: 10px;
+    padding: 11px 13px;
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+  }
+  .name-input::placeholder { color: var(--muted); }
+
+  .icon-btn {
+    background: var(--brass);
+    color: var(--felt-deep);
+    border: none;
+    border-radius: 10px;
+    padding: 0 16px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  .icon-btn:hover { background: var(--brass-hi); }
+
+  .link-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    margin-top: 8px;
+  }
+  .link-btn:hover { color: var(--ivory); }
+
+  textarea.bulk {
+    width: 100%;
+    margin-top: 10px;
+    background: var(--felt-deep);
+    border: 1px solid rgba(244,236,216,0.12);
+    color: var(--ivory);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 72px;
+  }
+  .bulk-row { display: none; flex-direction: column; }
+  .bulk-row.open { display: flex; }
+  .bulk-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .bulk-actions button {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    border-radius: 8px;
+    padding: 7px 12px;
+    border: 1px solid rgba(244,236,216,0.14);
+    background: transparent;
+    color: var(--ivory-dim);
+    cursor: pointer;
+  }
+  .bulk-actions button.primary {
+    background: var(--vermilion);
+    border-color: var(--vermilion);
+    color: var(--ivory);
+  }
+
+  ul.roster {
+    list-style: none;
+    margin: 14px 0 0;
+    padding: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  ul.roster li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    background: rgba(244,236,216,0.04);
+    border: 1px solid rgba(244,236,216,0.07);
+    border-radius: 8px;
+    padding: 7px 10px;
+    font-size: 0.92rem;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  ul.roster li.leaving { opacity: 0; transform: translateX(8px); }
+  ul.roster li .idx {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    width: 20px;
+    flex-shrink: 0;
+  }
+  ul.roster li .nm { flex: 1; }
+  ul.roster li button.remove {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  ul.roster li button.remove:hover { color: var(--danger); background: rgba(217,96,74,0.12); }
+
+  .roster-empty {
+    color: var(--muted);
+    font-size: 0.88rem;
+    padding: 10px 2px;
+  }
+
+  .settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(244,236,216,0.08);
+    gap: 10px;
+  }
+
+  .settings-row span.label {
+    font-size: 0.88rem;
+    color: var(--ivory-dim);
+  }
+
+  .toggle {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(244,236,216,0.16);
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--ivory-dim);
+    transition: transform 0.18s ease, background 0.18s ease;
+  }
+  .toggle.on { background: var(--vermilion); }
+  .toggle.on::after { transform: translateX(18px); background: var(--ivory); }
+
+  .reset-row {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  .reset-row button {
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--muted);
+    background: none;
+    border: 1px solid rgba(244,236,216,0.14);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .reset-row button:hover { color: var(--ivory); border-color: rgba(244,236,216,0.3); }
+
+  /* History */
+  ol.history {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  ol.history li {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 2px;
+    border-bottom: 1px dashed rgba(244,236,216,0.08);
+    color: var(--ivory-dim);
+  }
+  ol.history li:first-child { color: var(--win-glow); }
+  ol.history li .seq { color: var(--muted); }
+  .history-empty { color: var(--muted); font-size: 0.86rem; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(244,236,216,0.18); border-radius: 999px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  footer.credit {
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 40px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <span class="eyebrow">Classroom Draw</span>
+    <h1 class="title">Plinko Picker</h1>
+    <p class="tagline">Drop a marble through the pegboard to call on a student — every name gets an equal lane, and the board just makes it fun to watch.</p>
+  </header>
+
+  <div class="layout">
+    <section class="card board-card">
+      <div class="board-status">
+        <span class="pill" id="playersPill">0 in play</span>
+        <span class="pill" id="pickedPill" style="background:var(--panel-raised); color:var(--ivory-dim); border:1px solid rgba(244,236,216,0.14);">0 picked</span>
+      </div>
+      <div class="board-frame">
+        <canvas id="board" width="600" height="520" role="img" aria-label="Plinko board"></canvas>
+        <div class="banner" id="banner">
+          <div class="label">Landed on</div>
+          <div class="winner-name" id="bannerName">—</div>
+        </div>
+      </div>
+      <div class="board-actions">
+        <button class="drop-btn" id="dropBtn" disabled>Drop the marble</button>
+      </div>
+      <p class="empty-note" id="emptyNote">Add at least 2 students to start the board.</p>
+    </section>
+
+    <aside class="sidebar">
+      <section class="card">
+        <h2>Roster</h2>
+        <div class="add-row">
+          <input type="text" class="name-input" id="nameInput" placeholder="Add a student name…" autocomplete="off" />
+          <button class="icon-btn" id="addBtn" aria-label="Add name">+</button>
+        </div>
+        <button class="link-btn" id="bulkToggle">Paste a whole class list instead</button>
+        <div class="bulk-row" id="bulkRow">
+          <textarea class="bulk" id="bulkInput" placeholder="One name per line…"></textarea>
+          <div class="bulk-actions">
+            <button class="primary" id="bulkAdd">Add all</button>
+            <button id="bulkCancel">Cancel</button>
+          </div>
+        </div>
+
+        <ul class="roster" id="rosterList"></ul>
+        <p class="roster-empty" id="rosterEmpty">No students yet — add some above.</p>
+
+        <div class="settings-row">
+          <span class="label">Remove student after picking</span>
+          <button class="toggle on" id="removeToggle" role="switch" aria-checked="true" aria-label="Remove student after picking"></button>
+        </div>
+        <div class="reset-row">
+          <button id="resetBtn">Reset roster</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Scoreboard</h2>
+        <ol class="history" id="historyList"></ol>
+        <p class="history-empty" id="historyEmpty">Picks will show up here.</p>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="credit">No two drops follow the same path, but every name has exactly the same odds.</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- State ---------------- */
+  var STORAGE_KEY = "plinko-picker-state-v1";
+  var state = {
+    students: [],       // {id, name}
+    removeAfterPick: true,
+    history: []          // {name, seq}
+  };
+
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.students)) {
+        state.students = parsed.students;
+        state.removeAfterPick = parsed.removeAfterPick !== false;
+        state.history = Array.isArray(parsed.history) ? parsed.history : [];
+      }
+    } catch (e) { /* ignore corrupt storage */ }
+  }
+
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+  }
+
+  var fullRoster = null; // snapshot for "reset roster" once a session starts
+  function ensureFullRosterSnapshot() {
+    if (!fullRoster) fullRoster = state.students.slice();
+  }
+
+  var uid = 0;
+  function nextId() { uid += 1; return "s" + Date.now() + "_" + uid; }
+
+  /* ---------------- DOM refs ---------------- */
+  var $ = function (id) { return document.getElementById(id); };
+  var nameInput = $("nameInput"), addBtn = $("addBtn");
+  var bulkToggle = $("bulkToggle"), bulkRow = $("bulkRow"), bulkInput = $("bulkInput"), bulkAdd = $("bulkAdd"), bulkCancel = $("bulkCancel");
+  var rosterList = $("rosterList"), rosterEmpty = $("rosterEmpty");
+  var removeToggle = $("removeToggle"), resetBtn = $("resetBtn");
+  var dropBtn = $("dropBtn"), emptyNote = $("emptyNote");
+  var playersPill = $("playersPill"), pickedPill = $("pickedPill");
+  var banner = $("banner"), bannerName = $("bannerName");
+  var historyList = $("historyList"), historyEmpty = $("historyEmpty");
+  var canvas = $("board"), ctx = canvas.getContext("2d");
+
+  /* ---------------- Roster UI ---------------- */
+  function addName(raw) {
+    var name = (raw || "").trim();
+    if (!name) return;
+    state.students.push({ id: nextId(), name: name });
+    fullRoster = null;
+    renderRoster();
+    saveState();
+    layoutBoard();
+  }
+
+  function removeName(id) {
+    state.students = state.students.filter(function (s) { return s.id !== id; });
+    fullRoster = null;
+    renderRoster();
+    saveState();
+    layoutBoard();
+  }
+
+  function resetRoster() {
+    if (fullRoster && fullRoster.length) {
+      state.students = fullRoster.slice();
+    }
+    state.history = [];
+    fullRoster = null;
+    renderRoster();
+    renderHistory();
+    saveState();
+    layoutBoard();
+    hideBanner();
+  }
+
+  function renderRoster() {
+    rosterList.innerHTML = "";
+    rosterEmpty.style.display = state.students.length ? "none" : "block";
+    state.students.forEach(function (s, i) {
+      var li = document.createElement("li");
+      li.dataset.id = s.id;
+      var idx = document.createElement("span");
+      idx.className = "idx";
+      idx.textContent = String(i + 1).padStart(2, "0");
+      var nm = document.createElement("span");
+      nm.className = "nm";
+      nm.textContent = s.name;
+      var rm = document.createElement("button");
+      rm.className = "remove";
+      rm.setAttribute("aria-label", "Remove " + s.name);
+      rm.textContent = "×";
+      rm.addEventListener("click", function () { removeName(s.id); });
+      li.appendChild(idx);
+      li.appendChild(nm);
+      li.appendChild(rm);
+      rosterList.appendChild(li);
+    });
+    playersPill.textContent = state.students.length + " in play";
+    pickedPill.textContent = state.history.length + " picked";
+    dropBtn.disabled = state.students.length < 2 || dropping;
+    emptyNote.textContent = state.students.length < 2
+      ? "Add at least 2 students to start the board."
+      : "";
+  }
+
+  function renderHistory() {
+    historyList.innerHTML = "";
+    historyEmpty.style.display = state.history.length ? "none" : "block";
+    state.history.slice().reverse().forEach(function (h) {
+      var li = document.createElement("li");
+      var seq = document.createElement("span");
+      seq.className = "seq";
+      seq.textContent = "#" + h.seq;
+      var nm = document.createElement("span");
+      nm.textContent = h.name;
+      li.appendChild(seq);
+      li.appendChild(nm);
+      historyList.appendChild(li);
+    });
+  }
+
+  nameInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { addName(nameInput.value); nameInput.value = ""; }
+  });
+  addBtn.addEventListener("click", function () { addName(nameInput.value); nameInput.value = ""; nameInput.focus(); });
+
+  bulkToggle.addEventListener("click", function () {
+    bulkRow.classList.toggle("open");
+    if (bulkRow.classList.contains("open")) bulkInput.focus();
+  });
+  bulkCancel.addEventListener("click", function () { bulkRow.classList.remove("open"); bulkInput.value = ""; });
+  bulkAdd.addEventListener("click", function () {
+    bulkInput.value.split("\n").forEach(function (line) { addName(line); });
+    bulkInput.value = "";
+    bulkRow.classList.remove("open");
+  });
+
+  removeToggle.addEventListener("click", function () {
+    state.removeAfterPick = !state.removeAfterPick;
+    removeToggle.classList.toggle("on", state.removeAfterPick);
+    removeToggle.setAttribute("aria-checked", String(state.removeAfterPick));
+    saveState();
+  });
+
+  resetBtn.addEventListener("click", resetRoster);
+
+  /* ---------------- Fair randomness ---------------- */
+  function secureRandomInt(maxExclusive) {
+    if (maxExclusive <= 0) return 0;
+    var range = maxExclusive;
+    var bits = Math.ceil(Math.log2(range));
+    var bytes = Math.max(1, Math.ceil(bits / 8));
+    var maxVal = Math.pow(256, bytes);
+    var limit = maxVal - (maxVal % range);
+    var arr = new Uint8Array(bytes);
+    var val;
+    do {
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(arr);
+      } else {
+        for (var i = 0; i < bytes; i++) arr[i] = Math.floor(Math.random() * 256);
+      }
+      val = 0;
+      for (var j = 0; j < bytes; j++) val = val * 256 + arr[j];
+    } while (val >= limit);
+    return val % range;
+  }
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = secureRandomInt(i + 1);
+      var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+    }
+    return arr;
+  }
+
+  // Builds a random L/R bounce sequence that is CONSTRAINED to land on
+  // targetSlot, so the path looks organic every time but the outcome was
+  // already decided fairly (uniform pick) before the marble ever moves.
+  function buildPath(rows, targetSlot) {
+    var decisions = [];
+    for (var i = 0; i < rows; i++) decisions.push(i < targetSlot ? "R" : "L");
+    return shuffle(decisions);
+  }
+
+  /* ---------------- Board geometry + drawing ---------------- */
+  var layout = null; // { rows, spacing, rowHeight, centerX, topY, pegR, slots:[{x,name}] }
+  var dpr = Math.max(1, window.devicePixelRatio || 1);
+  var dropping = false;
+
+  function layoutBoard() {
+    var n = state.students.length;
+    var rows = Math.max(1, n - 1);
+    var frame = canvas.parentElement;
+    var maxWidth = Math.min(680, frame.clientWidth - 16 || 560);
+    var spacing = Math.max(26, Math.min(58, maxWidth / (rows + 2)));
+    var boardWidth = spacing * (rows + 1) + spacing * 2;
+    var width = Math.max(maxWidth, boardWidth);
+    var rowHeight = Math.max(26, Math.min(42, 380 / (rows + 1)));
+    var topPad = 46;
+    var slotRowH = 64;
+    var height = topPad + rowHeight * rows + slotRowH + 20;
+
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var centerX = width / 2;
+    var slots = [];
+    for (var j = 0; j <= rows; j++) {
+      var x = centerX + (j - rows / 2) * spacing;
+      slots.push({ x: x, name: n > 1 ? (state.students[j] ? state.students[j].name : "") : "" });
+    }
+
+    layout = {
+      rows: rows, spacing: spacing, rowHeight: rowHeight,
+      centerX: centerX, topY: topPad, pegR: Math.max(3, Math.min(5.5, spacing * 0.11)),
+      slotY: topPad + rowHeight * rows, width: width, height: height, slots: slots
+    };
+
+    drawBoard();
+  }
+
+  function pegPos(i, j) {
+    return {
+      x: layout.centerX + (j - i / 2) * layout.spacing,
+      y: layout.topY + i * layout.rowHeight
+    };
+  }
+
+  function drawPeg(x, y, glow) {
+    var r = layout.pegR;
+    var grad = ctx.createRadialGradient(x - r * 0.4, y - r * 0.4, 0.3, x, y, r * 1.4);
+    if (glow) {
+      grad.addColorStop(0, "#fff2c8");
+      grad.addColorStop(1, "#f6d488");
+    } else {
+      grad.addColorStop(0, "#f6d488");
+      grad.addColorStop(1, "#a97b28");
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    if (glow) {
+      ctx.beginPath();
+      ctx.arc(x, y, r * 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,215,122,0.18)";
+      ctx.fill();
+    }
+  }
+
+  function drawBoard(opts) {
+    opts = opts || {};
+    if (!layout) return;
+    var w = layout.width, h = layout.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // subtle felt seams
+    ctx.strokeStyle = "rgba(244,236,216,0.05)";
+    ctx.lineWidth = 1;
+    for (var gy = layout.topY; gy < layout.slotY; gy += layout.rowHeight) {
+      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+    }
+
+    // pegs
+    for (var i = 0; i < layout.rows; i++) {
+      for (var j = 0; j <= i; j++) {
+        var p = pegPos(i, j);
+        var isHot = opts.hotPeg && opts.hotPeg.row === i && opts.hotPeg.col === j;
+        drawPeg(p.x, p.y, isHot);
+      }
+    }
+
+    // slot dividers + labels
+    var dividerTop = layout.slotY;
+    var dividerBottom = layout.slotY + 56;
+    ctx.lineWidth = 2;
+    layout.slots.forEach(function (s, idx) {
+      var leftX = s.x - layout.spacing / 2;
+      if (idx === 0 || idx === layout.slots.length) return;
+    });
+    for (var d = 0; d <= layout.rows + 1; d++) {
+      var dx = layout.centerX + (d - (layout.rows + 1) / 2) * layout.spacing;
+      ctx.strokeStyle = "rgba(217,164,65,0.35)";
+      ctx.beginPath(); ctx.moveTo(dx, dividerTop); ctx.lineTo(dx, dividerBottom); ctx.stroke();
+    }
+    layout.slots.forEach(function (s, idx) {
+      var highlighted = opts.landedSlot === idx;
+      ctx.fillStyle = highlighted ? "rgba(226,83,47,0.28)" : "rgba(244,236,216,0.035)";
+      ctx.fillRect(s.x - layout.spacing / 2 + 1, dividerTop, layout.spacing - 2, dividerBottom - dividerTop);
+
+      ctx.save();
+      ctx.translate(s.x, dividerBottom - 10);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = highlighted ? "#ffe6b8" : "rgba(244,236,216,0.7)";
+      ctx.font = (highlighted ? "700 " : "600 ") + Math.max(10, Math.min(13, layout.spacing * 0.26)) + "px Manrope, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      var label = s.name.length > 14 ? s.name.slice(0, 13) + "…" : s.name;
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    });
+
+    // marble
+    if (opts.marble) drawMarble(opts.marble.x, opts.marble.y, opts.marble.squash);
+  }
+
+  function drawMarble(x, y, squash) {
+    squash = squash || 1;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1 / squash, squash);
+    var r = layout.pegR * 2.1;
+    var grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0.5, 0, 0, r * 1.3);
+    grad.addColorStop(0, "#ffffff");
+    grad.addColorStop(0.4, "#f4ecd8");
+    grad.addColorStop(1, "#c9bd9c");
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.restore();
+    ctx.beginPath();
+    ctx.ellipse(x, y + r * 1.05, r * 0.9, r * 0.25, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fill();
+  }
+
+  /* ---------------- Confetti ---------------- */
+  var confetti = [];
+  function spawnConfetti(x, y) {
+    var colors = ["#d9a441", "#f6d488", "#e2532f", "#f4ecd8"];
+    for (var i = 0; i < 26; i++) {
+      confetti.push({
+        x: x, y: y,
+        vx: (Math.random() - 0.5) * 5,
+        vy: -Math.random() * 5 - 2,
+        g: 0.18,
+        life: 60 + Math.random() * 20,
+        color: colors[i % colors.length],
+        size: 3 + Math.random() * 3,
+        rot: Math.random() * Math.PI
+      });
+    }
+  }
+  function stepConfetti() {
+    if (!confetti.length) return;
+    confetti.forEach(function (c) {
+      c.x += c.vx; c.y += c.vy; c.vy += c.g; c.life -= 1; c.rot += 0.15;
+    });
+    confetti = confetti.filter(function (c) { return c.life > 0 && c.y < layout.height + 20; });
+    confetti.forEach(function (c) {
+      ctx.save();
+      ctx.translate(c.x, c.y);
+      ctx.rotate(c.rot);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(-c.size / 2, -c.size / 2, c.size, c.size);
+      ctx.restore();
+    });
+  }
+
+  /* ---------------- Drop animation ---------------- */
+  function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+  function dropMarble() {
+    if (dropping || state.students.length < 2) return;
+    dropping = true;
+    dropBtn.disabled = true;
+    hideBanner();
+
+    var winnerIdx = secureRandomInt(state.students.length);
+    var winner = state.students[winnerIdx];
+    var rows = layout.rows;
+    var path = buildPath(rows, winnerIdx);
+
+    var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var perRow = reduced ? 1 : Math.max(70, Math.min(190, 2600 / rows));
+
+    // sequence of lattice positions the marble visits, row 0..rows
+    var points = [pegPos(0, 0)];
+    var j = 0;
+    for (var i = 0; i < rows; i++) {
+      if (path[i] === "R") j += 1;
+      points.push(i + 1 === rows ? { x: layout.slots[j].x, y: layout.slotY - 6 } : pegPos(i + 1, j));
+    }
+
+    var segIndex = 0;
+    var segStart = null;
+
+    function animateSegment(ts) {
+      if (segStart === null) segStart = ts;
+      var t = reduced ? 1 : Math.min(1, (ts - segStart) / perRow);
+      var from = points[segIndex], to = points[segIndex + 1];
+      var eased = easeOutCubic(t);
+      var mx = from.x + (to.x - from.x) * eased;
+      var my = from.y + (to.y - from.y) * t; // linear fall, eased horizontal
+      var squash = 1 + Math.sin(t * Math.PI) * 0.12;
+
+      var hotPeg = segIndex < rows ? { row: segIndex + 1, col: getCol(segIndex + 1) } : null;
+      drawBoard({ marble: { x: mx, y: my, squash: squash } });
+
+      if (t >= 1) {
+        segIndex += 1;
+        segStart = null;
+        if (segIndex >= points.length - 1) {
+          landMarble(winner, winnerIdx, points[points.length - 1]);
+          return;
+        }
+      }
+      requestAnimationFrame(animateSegment);
+    }
+
+    function getCol(rowIdx) {
+      var count = 0;
+      for (var k = 0; k < rowIdx; k++) if (path[k] === "R") count += 1;
+      return count;
+    }
+
+    requestAnimationFrame(animateSegment);
+  }
+
+  function landMarble(winner, winnerIdx, pos) {
+    spawnConfetti(pos.x, layout.slotY + 20);
+    var frames = 0;
+    // The board's geometry (slot count/positions) must stay frozen for the
+    // whole settle animation, since it was computed for winnerIdx — any
+    // roster mutation that changes layout is deferred to onSettled below.
+    function settle() {
+      frames += 1;
+      drawBoard({ landedSlot: winnerIdx, marble: { x: pos.x, y: layout.slotY + 20, squash: 1 } });
+      stepConfetti();
+      if (confetti.length && frames < 90) {
+        requestAnimationFrame(settle);
+      } else {
+        drawBoard({ landedSlot: winnerIdx });
+        onSettled();
+      }
+    }
+    requestAnimationFrame(settle);
+
+    showBanner(winner.name);
+    state.history.push({ name: winner.name, seq: state.history.length + 1 });
+    renderHistory();
+
+    ensureFullRosterSnapshot();
+    if (state.removeAfterPick) {
+      var li = rosterList.querySelector('li[data-id="' + winner.id + '"]');
+      if (li) li.classList.add("leaving");
+    }
+
+    function onSettled() {
+      if (state.removeAfterPick) {
+        state.students = state.students.filter(function (s) { return s.id !== winner.id; });
+        renderRoster();
+        layoutBoard();
+      } else {
+        renderRoster();
+      }
+      saveState();
+      dropping = false;
+      dropBtn.disabled = state.students.length < 2;
+    }
+  }
+
+  function showBanner(name) {
+    bannerName.textContent = name;
+    banner.classList.add("show");
+  }
+  function hideBanner() {
+    banner.classList.remove("show");
+  }
+
+  dropBtn.addEventListener("click", dropMarble);
+
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(layoutBoard, 120);
+  });
+
+  /* ---------------- Init ---------------- */
+  loadState();
+  if (!state.students.length) {
+    ["Ava", "Noah", "Maya", "Liam", "Zoe", "Kai"].forEach(function (n) {
+      state.students.push({ id: nextId(), name: n });
+    });
+  }
+  removeToggle.classList.toggle("on", state.removeAfterPick);
+  removeToggle.setAttribute("aria-checked", String(state.removeAfterPick));
+  renderRoster();
+  renderHistory();
+  layoutBoard();
+})();
+</script>
+</body>
+</html>
