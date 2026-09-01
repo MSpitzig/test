@@ -1080,6 +1080,22 @@
       points.push(i + 1 === rows ? { x: latticeX(j), y: layout.slotY - 6 } : pegPos(i + 1, j));
     }
 
+    // The marble's rendered path stops at the peg's SURFACE, not its
+    // center — routing the ball's center exactly onto each peg's center
+    // (the naive approach) makes the two circles overlap dead-on at every
+    // impact, which reads as the ball melting into the peg rather than
+    // bouncing off it. Nudge each peg waypoint sideways by the combined
+    // radius, away from the direction it's approached from — vertical
+    // motion is untouched (it's driven entirely by the gravity formula
+    // below, off "from", never "to"), so this can't desync the timing.
+    var marbleR = layout.pegR * 2.1;
+    var combinedR = layout.pegR + marbleR;
+    var renderPoints = points.map(function (p) { return { x: p.x, y: p.y }; });
+    for (var rp = 2; rp < points.length - 1; rp++) {
+      var pdx = points[rp].x - points[rp - 1].x;
+      if (pdx !== 0) renderPoints[rp].x = points[rp].x - Math.sign(pdx) * combinedR;
+    }
+
     // Real kinematics: constant gravity, and each peg impact reflects the
     // marble's downward velocity back upward (losing some of it, a real
     // bounce) instead of just carrying it forward — so it actually rises
@@ -1122,14 +1138,15 @@
           ob.hitTs = ts;
           ob.cooldownUntil = ts + 380;
           var nx = dist > 0.001 ? dx / dist : (Math.random() < 0.5 ? -1 : 1);
-          bumpVX += nx * (hitDist - dist + 22) * 1.3;
+          // capped so a near-dead-center pass can't fling it unnaturally far
+          bumpVX += nx * Math.min(hitDist - dist, hitDist * 0.45) * 0.4;
         }
       });
     }
 
     function animateSegment(ts) {
       if (segStart === null) segStart = ts;
-      var from = points[segIndex], to = points[segIndex + 1];
+      var from = renderPoints[segIndex], to = renderPoints[segIndex + 1];
       var T = hopDur[segIndex], v0 = hopVy0[segIndex];
       var elapsedSec = Math.min((ts - segStart) / 1000, T);
       var u = T > 0 ? elapsedSec / T : 1;
@@ -1144,7 +1161,7 @@
       var squash = 1 + 0.22 * (vyImpact > 0 ? currentVy / vyImpact : 0) - 0.3 * Math.pow(u, 6);
 
       applyObstacleHits(mx, my, ts);
-      bumpVX *= 0.85; bumpX += bumpVX; bumpX *= 0.88;
+      bumpVX *= 0.9; bumpX += bumpVX; bumpX *= 0.93;
 
       var hotPeg = (u > 0.85 && segIndex < rows) ? { row: segIndex, col: getCol(segIndex) } : null;
       drawBoard({ marble: { x: mx + bumpX, y: my, squash: squash }, hotPeg: hotPeg, ts: ts });
@@ -1153,7 +1170,7 @@
         segIndex += 1;
         segStart = null;
         if (segIndex >= points.length - 1) {
-          landMarble(winner, winnerIdx, points[points.length - 1]);
+          landMarble(winner, winnerIdx, renderPoints[points.length - 1]);
           return;
         }
       }
