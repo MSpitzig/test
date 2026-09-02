@@ -1,20 +1,23 @@
 # Plinko Picker
 
-A marble-race random student picker for the classroom. Every remaining
-student gets their own colored marble; they all drop together through a
-shared pegboard, and whichever one crosses the finish line first wins.
+A Plinko-style random student picker for the classroom. One marble drops
+through a pegboard full of pegs and swirling obstacles and settles into a
+bottom bin labeled with a student's name.
 
 It's a real 2D physics simulation, not a scripted animation — gravity,
-elastic collisions off pegs, spinning obstacles, and each other. Fairness
-comes from shuffling which student gets which starting lane before every
-race, so no student is systematically favored by track position over
-repeated use.
+elastic collisions off pegs, obstacles, divider walls, and the floor, all
+the way down. A real pegboard isn't statistically uniform across bins (the
+middle tends to win more, like an actual Galton board), so instead of
+forcing the physics to be fair, every bin gets a freshly shuffled name
+right before each drop — whichever bin the marble happens to favor, the
+name in it is equally likely to be anyone, so every student ends up with
+exactly the same odds no matter how biased the board itself is.
 
 ## Features
 
 - Add students one at a time, or paste a whole class list (one name per line)
-- Every student gets a distinct, stable marble color, shown as a swatch in
-  the roster and a label on their marble
+- Board automatically sizes itself with one bin per active student, and
+  scrolls for larger classes
 - "Remove after picking" toggle for drawing without repeats, with a one-click
   roster reset
 - Scoreboard history of past picks
