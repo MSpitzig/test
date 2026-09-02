@@ -738,7 +738,15 @@
     var frame = canvas.parentElement;
     var width = Math.min(680, frame.clientWidth - 16 || 560);
     var PEG_COLS = 9, PEG_ROWS = 9;
-    var spacingX = width / (PEG_COLS + 1);
+    // Sized roughly first just to place the walls near the canvas edge —
+    // the real, load-bearing spacing is derived below FROM the walls, so
+    // the peg grid always spans the full walkable width no matter how it
+    // got sized. (Getting this backwards — sizing the walls off pegs that
+    // stop short of them — is what let marbles in the outermost starting
+    // lanes free-fall down a peg-free margin and win every time.)
+    var approxSpacing = width / (PEG_COLS + 1);
+    var wallLeft = approxSpacing * 0.35, wallRight = width - approxSpacing * 0.35;
+    var spacingX = (wallRight - wallLeft) / PEG_COLS;
     var spacingY = Math.max(36, Math.min(48, spacingX * 1.05));
     var pegR = Math.max(4, Math.min(6, spacingX * 0.12));
     var introTop = 26;
@@ -754,20 +762,23 @@
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    var wallLeft = spacingX * 0.35, wallRight = width - spacingX * 0.35;
     var centerX = width / 2;
 
     // Offset "brick" rows — the classic pachinko pattern — so a marble
     // never has a clean straight gap to fall through; it always has to
-    // pick a side.
+    // pick a side. Aligned rows reach within half a peg-spacing of each
+    // wall, so every starting lane (see pegFieldLeft/Right below) is
+    // guaranteed to be inside peg-covered territory.
     var pegs = [];
     for (var r = 0; r < PEG_ROWS; r++) {
-      var offset = (r % 2 === 1) ? spacingX / 2 : 0;
-      var cols = (r % 2 === 1) ? PEG_COLS - 1 : PEG_COLS;
+      var staggered = (r % 2 === 1);
+      var rowOffset = staggered ? spacingX / 2 : 0;
+      var cols = staggered ? PEG_COLS - 1 : PEG_COLS;
       for (var c = 0; c < cols; c++) {
-        pegs.push({ x: spacingX + c * spacingX + offset, y: topY + r * spacingY, r: pegR, hitTs: -Infinity });
+        pegs.push({ x: wallLeft + spacingX * 0.5 + rowOffset + c * spacingX, y: topY + r * spacingY, r: pegR, hitTs: -Infinity });
       }
     }
+    var pegFieldLeft = wallLeft + spacingX * 0.5, pegFieldRight = wallRight - spacingX * 0.5;
 
     var fieldHalfWidth = (wallRight - wallLeft) / 2;
     var obstacleDefs = [
@@ -807,6 +818,7 @@
 
     layout = {
       width: width, height: height, wallLeft: wallLeft, wallRight: wallRight,
+      pegFieldLeft: pegFieldLeft, pegFieldRight: pegFieldRight,
       introTop: introTop, introHeight: introHeight, topY: topY, finishY: finishY,
       spacingX: spacingX, spacingY: spacingY, pegR: pegR, centerX: centerX,
       pegs: pegs, obstacles: obstacles
@@ -816,7 +828,7 @@
   }
 
   function marbleRadiusFor(n) {
-    var usable = layout.wallRight - layout.wallLeft;
+    var usable = layout.pegFieldRight - layout.pegFieldLeft;
     var byLane = (usable / Math.max(n, 2)) * 0.34;
     return Math.max(6, Math.min(15, layout.spacingX * 0.3, byLane));
   }
@@ -825,11 +837,11 @@
     var n = state.students.length;
     if (!n || !layout) return [];
     var r = marbleRadiusFor(n);
-    var usable = layout.wallRight - layout.wallLeft;
+    var usable = layout.pegFieldRight - layout.pegFieldLeft;
     var laneW = usable / n;
     var y = layout.introTop + r + 4;
     return state.students.map(function (s, i) {
-      return { student: s, hue: s.hue, x: layout.wallLeft + laneW * (i + 0.5), y: y, r: r };
+      return { student: s, hue: s.hue, x: layout.pegFieldLeft + laneW * (i + 0.5), y: y, r: r };
     });
   }
 
@@ -1076,12 +1088,12 @@
     var order = shuffle(state.students.slice());
     var n = order.length;
     var r = marbleRadiusFor(n);
-    var usable = layout.wallRight - layout.wallLeft;
+    var usable = layout.pegFieldRight - layout.pegFieldLeft;
     var laneW = usable / n;
     var marbles = order.map(function (student, i) {
       return {
         student: student, hue: student.hue,
-        x: layout.wallLeft + laneW * (i + 0.5) + (secureRandomInt(9) - 4),
+        x: layout.pegFieldLeft + laneW * (i + 0.5) + (secureRandomInt(9) - 4),
         y: layout.introTop + r + 2 + secureRandomInt(8),
         vx: (secureRandomInt(9) - 4) * 6,
         vy: 0, r: r
